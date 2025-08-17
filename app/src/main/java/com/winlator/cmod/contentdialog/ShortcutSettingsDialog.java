@@ -383,8 +383,6 @@ public class ShortcutSettingsDialog extends ContentDialog {
 
         final CPUListView cpuListView = findViewById(R.id.CPUListView);
         cpuListView.setCheckedCPUList(shortcut.getExtra("cpuList", shortcut.container.getCPUList(true)));
-        final CPUListView cpuListViewWoW64 = findViewById(R.id.CPUListViewWoW64);
-        cpuListViewWoW64.setCheckedCPUList(shortcut.getExtra("cpuListWoW64", shortcut.container.getCPUListWoW64(true)));
 
         setOnConfirmCallback(() -> {
             String name = etName.getText().toString().trim();
@@ -482,9 +480,6 @@ public class ShortcutSettingsDialog extends ContentDialog {
 
                 String cpuList = cpuListView.getCheckedCPUListAsString();
                 shortcut.putExtra("cpuList", !cpuList.equals(shortcut.container.getCPUList(true)) ? cpuList : null);
-
-                String cpuListWoW64 = cpuListViewWoW64.getCheckedCPUListAsString();
-                shortcut.putExtra("cpuListWoW64", !cpuListWoW64.equals(shortcut.container.getCPUListWoW64(true)) ? cpuListWoW64 : null);
 
                 // Save all changes to the shortcut
                 shortcut.saveData();

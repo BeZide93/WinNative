@@ -405,7 +405,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         if (shortcut != null) {
             taskAffinityMask = (short) ProcessHelper.getAffinityMask(shortcut.getExtra("cpuList", container.getCPUList(true)));
-            taskAffinityMaskWoW64 = (short) ProcessHelper.getAffinityMask(shortcut.getExtra("cpuListWoW64", container.getCPUListWoW64(true)));
+            taskAffinityMaskWoW64 = taskAffinityMask;
         }
 
         // Determine the class name for the startup workarounds
@@ -1924,7 +1924,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private void assignTaskAffinity(Window window) {
-        if (taskAffinityMask == 0) return;
+        if (taskAffinityMask == 0 || taskAffinityMaskWoW64 == 0) return;
         int processId = window.getProcessId();
         String className = window.getClassName();
         int processAffinity = window.isWoW64() ? taskAffinityMaskWoW64 : taskAffinityMask;
