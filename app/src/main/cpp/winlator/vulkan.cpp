@@ -129,11 +129,12 @@ VkResult get_physical_devices(VkInstance instance, std::vector<VkPhysicalDevice>
     if (!enumeratePhysicalDevices)
         return VK_ERROR_INITIALIZATION_FAILED;
 
-    enumeratePhysicalDevices(instance, &deviceCount, NULL);
-    physical_devices.resize(deviceCount);
+    result = enumeratePhysicalDevices(instance, &deviceCount, NULL);
 
-    if (deviceCount > 0)
+    if (result == VK_SUCCESS && deviceCount > 0) {
+        physical_devices.resize(deviceCount);
         result = enumeratePhysicalDevices(instance, &deviceCount, physical_devices.data());
+    }
 
     return result;
 }
@@ -142,13 +143,16 @@ extern "C" JNIEXPORT jboolean  JNICALL
 Java_com_winlator_cmod_core_GPUInformation_isDriverSupported(JNIEnv *env, jclass obj, jstring driverName, jobject context) {
     VkResult result;
     VkInstance instance;
+    std::vector<VkPhysicalDevice> pdevices;
     PFN_vkDestroyInstance destroyInstance;
     jboolean isSupported = false;
 
     result = create_instance(driverName, env, context, &instance);
 
     if (result == VK_SUCCESS) {
-        isSupported = true;
+        result = get_physical_devices(instance, pdevices);
+        if (result == VK_SUCCESS && (static_cast<uint32_t>(pdevices.size()) > 0))
+            isSupported = true;
         destroyInstance = (PFN_vkDestroyInstance)gip(instance, "vkDestroyInstance");
         destroyInstance(instance, nullptr);
     }
