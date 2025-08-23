@@ -141,7 +141,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private String audioDriver = Container.DEFAULT_AUDIO_DRIVER;
     private String emulator = Container.DEFAULT_EMULATOR;
     private String dxwrapper = Container.DEFAULT_DXWRAPPER;
-    private String ddrawrapper = Container.DEFAULT_DDRAWRAPPER;
     private KeyValueSet dxwrapperConfig;
     private String startupSelection;
     private WineInfo wineInfo;
@@ -438,7 +437,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         emulator = container.getEmulator();
         midiSoundFont = container.getMIDISoundFont();
         dxwrapper = container.getDXWrapper();
-        ddrawrapper = container.getDDrawWrapper();
         String dxwrapperConfig = container.getDXWrapperConfig();
         screenSize = container.getScreenSize();
         winHandler.setInputType((byte) container.getInputType());
@@ -455,7 +453,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             audioDriver = shortcut.getExtra("audioDriver", container.getAudioDriver());
             emulator = shortcut.getExtra("emulator", container.getEmulator());
             dxwrapper = shortcut.getExtra("dxwrapper", container.getDXWrapper());
-            ddrawrapper = shortcut.getExtra("ddrawrapper", container.getDDrawWrapper());
             dxwrapperConfig = shortcut.getExtra("dxwrapperConfig", container.getDXWrapperConfig());
             screenSize = shortcut.getExtra("screenSize", container.getScreenSize());
             lc_all = shortcut.getExtra("lc_all", container.getLC_ALL());
@@ -976,7 +973,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (dxwrapper.contains("dxvk")) {
             String dxvkWrapper = "dxvk-" + dxwrapperConfig.get("version");
             String vkd3dWrapper = "vkd3d-" + dxwrapperConfig.get("vkd3dVersion");
-            dxwrapper = dxvkWrapper + ";" + vkd3dWrapper;
+            String ddrawrapper = dxwrapperConfig.get("ddrawrapper");
+            dxwrapper = dxvkWrapper + ";" + vkd3dWrapper + ";" + ddrawrapper;
         }
 
         if (!dxwrapper.equals(container.getExtra("dxwrapper"))) {
@@ -984,16 +982,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             container.putExtra("dxwrapper", dxwrapper);
             containerDataChanged = true;
         }
-
-        String ddrawrapper = this.ddrawrapper;
-
-        if (!ddrawrapper.equals(container.getExtra("ddrawrapper"))) {
-            extractDDrawrapperFiles(ddrawrapper);
-            container.putExtra("ddrawrapper", ddrawrapper);
-            containerDataChanged = true;
-        }
-
-        if (ddrawrapper.equals("cnc-ddraw")) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\windows\\syswow64\\ddraw.ini");
 
         String wincomponents = shortcut != null ? shortcut.getExtra("wincomponents", container.getWinComponents()) : container.getWinComponents();
         if (!wincomponents.equals(container.getExtra("wincomponents"))) {
@@ -1626,7 +1614,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private static final String TAG = "DXWrapperExtraction";
 
     private void extractDXWrapperFiles(String dxwrapper) {
-        final String[] dlls = {"d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "d3d8.dll", "d3d9.dll", "dxgi.dll"};
+        final String[] dlls = {"d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "d3d8.dll", "d3d9.dll", "dxgi.dll", "ddraw.dll", "d3dimm.dll"};
 
         File rootDir = imageFs.getRootDir();
         File windowsDir = new File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows");
@@ -1635,6 +1623,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             Log.d(TAG, "Extracting DXVK wrapper files, version: " + dxwrapper);
             String dxvkWrapper = dxwrapper.split(";")[0];
             String vkd3dWrapper = dxwrapper.split(";")[1];
+            String ddrawrapper = dxwrapper.split(";")[2];
             ContentProfile dxvkProfile = contentsManager.getProfileByEntryName(dxvkWrapper);
             if (dxvkProfile != null) {
                 Log.d(TAG, "Applying user-defined DXVK content profile: " + dxvkWrapper);
@@ -1664,39 +1653,27 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 Log.d(TAG, "Extracting fallback VKD3D .tzst archive: " + vkd3dWrapper);
                 TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/" + vkd3dWrapper + ".tzst", windowsDir, onExtractFileListener);
             }
-            Log.d(TAG, "Finished extraction of DXVK wrapper files, version: " + dxwrapper);
 
+            Log.d(TAG, "Extracting nglide wrapper");
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/nglide.tzst", windowsDir, onExtractFileListener);
+
+            if (ddrawrapper.contains("None")) {
+                Log.d(TAG, "No DDRaw wrapper has been selected, restoring original ddraw files");
+                restoreOriginalDllFiles(new String[]{ "ddraw.dll", "d3dimm.dll" });
+                return;
+            }
+
+            if (ddrawrapper.equals("cnc-ddraw")) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\windows\\syswow64\\ddraw.ini");
+
+            Log.d(TAG, "Extracting ddrawrapper " + ddrawrapper);
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/" + ddrawrapper + ".tzst", windowsDir, onExtractFileListener);
+
+            Log.d(TAG, "Finished extraction of DXVK wrapper files, version: " + dxwrapper);
         } else if (dxwrapper.contains("wined3d")) {
             Log.d(TAG, "Restoring original DLL files for wined3d.");
             restoreOriginalDllFiles(dlls);
         }
     }
-
-    private void extractDDrawrapperFiles(String ddrawrapper) {
-        final String[] dlls = {"ddraw.dll","d3dimm.dll"};
-        final String[] glideDlls = {"glide.dll", "glide2x.dll", "glide3x.dll", "3DfxSpl.dll", "3DfxSpl2.dll", "3DfxSpl3.dll"};
-
-        File rootDir = imageFs.getRootDir();
-        File windowsDir = new File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows");
-
-        Log.d("XServerDisplayActivity", "Deleting glide dlls before extraction");
-        for (String glideDLL : glideDlls) {
-            FileUtils.delete(new File(windowsDir + "/syswow64/" + glideDLL));
-        }
-
-        if (ddrawrapper.equals("wined3d")) {
-            Log.d("XserverDisplayActivity", "Restoring original dlls for WineD3D");
-            restoreOriginalDllFiles(dlls);
-        }
-        else {
-            Log.d("XServerDisplayActivity", "Extracting ddrawrapper " + ddrawrapper);
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/" + ddrawrapper + ".tzst", windowsDir, onExtractFileListener);
-        }
-
-        Log.d("XServerDisplayActivity", "Extracting nglide wrapper");
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/nglide.tzst", windowsDir, onExtractFileListener);
-    }
-
 
     private static int compareVersion(String varA, String varB) {
         final String[] levelsA = varA.split("\\.");

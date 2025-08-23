@@ -104,5 +104,17 @@
             android:id="@+id/SVKD3DFeatureLevel"
             android:spinnerMode="dialog" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/ddraw_wrapper" />
+
+        <Spinner
+            style="@style/ComboBox"
+            android:layout_width="match_parent"
+            android:id="@+id/SDDRAWrapper"
+            android:entries="@array/ddrawrapper_entries"
+            android:spinnerMode="dialog" />
+
     </LinearLayout>
 </ScrollView>
