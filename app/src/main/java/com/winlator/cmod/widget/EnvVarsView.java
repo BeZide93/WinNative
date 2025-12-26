@@ -28,6 +28,7 @@ import java.util.Arrays;
 
 public class EnvVarsView extends FrameLayout {
     public static final String[][] knownEnvVars = {
+        {"IR3_SHADER_DEBUG", "SELECT_MULTIPLE", "nouboopt", "noearlypreamble"),
         {"ZINK_DESCRIPTORS", "SELECT", "auto", "lazy", "cached", "notemplates"},
         {"ZINK_DEBUG", "SELECT_MULTIPLE", "nir", "spirv", "tgsi", "validation", "sync", "compact", "noreorder"},
         {"MESA_SHADER_CACHE_DISABLE", "CHECKBOX", "false", "true"},
@@ -250,6 +251,7 @@ public class EnvVarsView extends FrameLayout {
     }
 
 }
+
 
 
 
