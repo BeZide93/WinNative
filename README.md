@@ -4,9 +4,9 @@
 
 # WinNative: High-Performance Windows Emulation for Android
 
-**WinNative** is an advanced, high-performance Windows (x86_64) emulation environment for Android. It bridges the gap between desktop gaming and mobile mobility by unifying the best technologies from **Winlator Bionic**, **Pluvia**, and **GameNative-Performance**. 
+**WinNative** is an advanced, high-performance Windows (x86_64) emulation environment for Android. It bridges the gap between desktop gaming and mobile mobility by unifying the best technologies from **Winlator Bionic** and **Pluvia**.
 
-Designed for enthusiasts and power users, WinNative provides a "plug-and-play" experience with a console-like interface, deep controller integration, and hardware-specific optimizations for modern Snapdragon/Adreno devices.
+Designed for enthusiasts and power users, WinNative provides a "plug-and-play" experience with a console-like interface, deep controller integration, and hardware-specific optimizations for modern Snapdragon devices.
 
 ---
 
@@ -19,7 +19,7 @@ Designed for enthusiasts and power users, WinNative provides a "plug-and-play" e
 
 ### ⚙️ Peak Performance
 - **Bionic Environment:** Uses an Ubuntu Bionic-based RootFS for lower overhead and better compatibility with modern x86_64 applications.
-- **Adreno Optimization:** Deeply integrated Turnip/Zink drivers with specialized profiles for Snapdragon 8 Gen 2/3 and 8 Elite (Adreno 7xx/8xx).
+- **Adreno Optimization:** Deeply integrated Turnip/Zink drivers with specialized profiles for Snapdragon 8 Gen 2 and Gen 3 (Adreno 7xx).
 - **Ludashi Branding:** Built with the `com.ludashi.benchmark` package name to trigger "Performance Mode" on Xiaomi and other OEM devices, reducing thermal throttling.
 - **Hybrid Emulation:** Supports Box86/Box64, FEXCore (Arm64EC), and WowBox64 to ensure maximum compatibility across different instruction sets.
 
@@ -34,9 +34,9 @@ Designed for enthusiasts and power users, WinNative provides a "plug-and-play" e
 
 WinNative is built on the shoulders of giants. It includes and supports:
 - **Translators:** Box86/Box64 by [ptitSeb](https://github.com/ptitSeb), FEX-Emu.
-- **Graphics:** DXVK (up to 2.4), VKD3D (3.0b optimized for A840), D8VK, and CNC DDraw.
+- **Graphics:** DXVK (up to 2.4), VKD3D (3.0b), D8VK, and CNC DDraw.
 - **Kernel/Environment:** PRoot environment with custom `evshim` for low-latency input.
-- **Drivers:** Optimized Turnip drivers (v1.8.8/v1.8.9) with specific fixes for UBWC v5/v6 and Adreno 8xx chips.
+- **Drivers:** Optimized Turnip drivers with specific fixes for UBWC v5/v6.
 
 ---
 
@@ -45,7 +45,7 @@ WinNative is built on the shoulders of giants. It includes and supports:
 We are committed to making WinNative the gold standard for mobile emulation.
 - [x] **Unified Interface:** Compose-based library with controller navigation.
 - [x] **Smart Power Management:** Dynamic refresh of power constraints during heavy emulation.
-- [x] **Adreno 8xx Support:** Full compatibility with Snapdragon 8 Elite.
+- [ ] **Epic, GOG, Amazon Stores:** Expanding library support for multi-store integration.
 - [ ] **Direct Game Launching:** Deep-linking shortcuts directly from the Android home screen.
 - [ ] **Advanced DRM Handling:** Improved support for games requiring specialized file redirections.
 - [ ] **Cloud Save Sync:** Integrating local playtime and saves with community cloud solutions.
@@ -66,7 +66,7 @@ We are committed to making WinNative the gold standard for mobile emulation.
 
 - **Original Winlator** by [brunodev85](https://github.com/brunodev85/winlator)
 - **Winlator Bionic** by [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator)
-- **Pluvia/GameNative** features by the GameNative community.
+- **Pluvia** features by the Pluvia/GameNative community.
 - **Mesa/Turnip** contributions by [Danylo](https://blogs.igalia.com/dpiliaiev/tags/mesa/) and the Mesa3D team.
 
 ---
