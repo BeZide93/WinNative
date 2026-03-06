@@ -72,18 +72,27 @@ public class ContainersFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         manager = new ContainerManager(getContext());
         loadContainersList();
-        ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle(R.string.containers);
     }
 
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        FrameLayout frameLayout = (FrameLayout) inflater.inflate(R.layout.containers_fragment, container, false);
-        recyclerView = frameLayout.findViewById(R.id.RecyclerView);
-        emptyTextView = frameLayout.findViewById(R.id.TVEmptyText);
+        View view = inflater.inflate(R.layout.containers_fragment, container, false);
+        recyclerView = view.findViewById(R.id.RecyclerView);
+        emptyTextView = view.findViewById(R.id.TVEmptyText);
         recyclerView.setLayoutManager(new LinearLayoutManager(recyclerView.getContext()));
-        recyclerView.addItemDecoration(new DividerItemDecoration(recyclerView.getContext(), DividerItemDecoration.VERTICAL));
-        return frameLayout;
+        
+        view.findViewById(R.id.BTAddContainer).setOnClickListener(v -> {
+            if (!ImageFs.find(getContext()).isValid()) return;
+            FragmentManager fragmentManager = getParentFragmentManager();
+            fragmentManager.beginTransaction()
+                    .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
+                    .addToBackStack(null)
+                    .replace(R.id.FLFragmentContainer, new ContainerDetailFragment())
+                    .commit();
+        });
+
+        return view;
     }
 
     private void loadContainersList() {
@@ -94,15 +103,7 @@ public class ContainersFragment extends Fragment {
 
     @Override
     public void onCreateOptionsMenu(Menu menu, MenuInflater menuInflater) {
-        // Clear any existing menu items to prevent duplication
-        menu.clear();
-        menuInflater.inflate(R.menu.containers_menu, menu);
-        MenuItem bigPictureItem = menu.findItem(R.id.action_big_picture_mode);
-        Drawable icon = bigPictureItem.getIcon();
-        if (icon != null) {
-            icon.mutate(); // Ensure we don't modify other instances of this drawable
-            icon.setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN);
-        }
+        // Menu removed to clean up header bar
     }
 
     @Override

@@ -116,7 +116,7 @@ public class ContainerManager {
         });
     }
 
-    private Container createContainer(JSONObject data, ContentsManager contentsManager) {
+    public Container createContainer(JSONObject data, ContentsManager contentsManager) {
         try {
             int id = maxContainerId + 1;
             data.put("id", id);

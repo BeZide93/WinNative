@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingLeft="16dp"
-    android:paddingRight="16dp"
-    android:gravity="center_vertical">
+    android:background="@drawable/tab_layout_background_dark"
+    android:layout_marginBottom="8dp"
+    android:padding="12dp">
 
     <LinearLayout
         android:id="@+id/LLInnerArea"
@@ -14,29 +16,28 @@
         android:layout_weight="1"
         android:clickable="true"
         android:focusable="true"
-        android:layout_marginRight="12dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <ImageView
             android:id="@+id/ImageView"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:layout_marginRight="16dp"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="16dp"
+            android:padding="8dp"
+            android:background="@drawable/circle_background"
+            app:tint="@color/white" />
 
         <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center_vertical">
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
             <TextView
                 android:id="@+id/TVTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/colorPrimary"
+                android:textColor="@color/white"
                 android:textStyle="bold"
                 android:ellipsize="end"
                 android:maxLines="1" />
@@ -45,13 +46,19 @@
                 android:id="@+id/TVSubtitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:textColor="@color/gray"
                 android:ellipsize="end"
                 android:maxLines="1" />
         </LinearLayout>
     </LinearLayout>
 
     <ImageButton
-        style="@style/ListMenuButton"
         android:id="@+id/BTMenu"
-        android:src="@drawable/icon_list_item_menu" />
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/icon_list_item_menu"
+        app:tint="@color/white" />
+
 </LinearLayout>

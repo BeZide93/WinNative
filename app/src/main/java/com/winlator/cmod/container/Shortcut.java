@@ -289,8 +289,13 @@ import java.nio.file.Files;
         public int getContainerId() {
             return container.id;
         }
-         
+
+        public JSONObject getExtraData() {
+            return extraData;
+        }
+
         public String getExecutable() {
+
             String exe = "";
             try {
                 List<String> lines = Files.readAllLines(file.toPath());

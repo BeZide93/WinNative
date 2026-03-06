@@ -73,6 +73,8 @@ public class Container {
     private String controllerMapping = new String(new char[XrControllerMapping.values().length]);
     private String box64Version;
     private String emulator;
+    private String executablePath = "";
+    private String execArgs = "";
 
     private ContainerManager containerManager;
 
@@ -89,6 +91,23 @@ public class Container {
         this.containerManager = containerManager;
     }
 
+    
+    public String getExecutablePath() {
+        return executablePath;
+    }
+
+    public void setExecutablePath(String executablePath) {
+        this.executablePath = executablePath != null ? executablePath : "";
+    }
+
+    public String getExecArgs() {
+        return execArgs;
+    }
+
+    public void setExecArgs(String execArgs) {
+        this.execArgs = execArgs != null ? execArgs : "";
+    }
+    
     public ContainerManager getManager() {
         return containerManager;
     }
@@ -285,7 +304,11 @@ public class Container {
         this.extraData = extraData;
     }
 
-    public String getExtra(String name) {
+    public String getLanguage() {
+        return getExtra("containerLanguage", "english");
+    }
+
+    public String getExtra(String key) {
         return getExtra(name, "");
     }
 
@@ -393,6 +416,8 @@ public class Container {
             data.put("graphicsDriver", graphicsDriver);
             data.put("graphicsDriverConfig", graphicsDriverConfig);
             data.put("emulator", emulator);
+            data.put("executablePath", executablePath);
+            data.put("execArgs", execArgs);
             data.put("dxwrapper", dxwrapper);
             if (!dxwrapperConfig.isEmpty()) data.put("dxwrapperConfig", dxwrapperConfig);
             data.put("audioDriver", audioDriver);
@@ -447,6 +472,13 @@ public class Container {
                     break;
                 case "graphicsDriverConfig" :
                     setGraphicsDriverConfig(data.getString(key));
+                    break;
+                
+                case "executablePath":
+                    setExecutablePath(data.getString(key));
+                    break;
+                case "execArgs":
+                    setExecArgs(data.getString(key));
                     break;
                 case "emulator":
                     setEmulator(data.getString(key));

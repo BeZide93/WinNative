@@ -5,58 +5,69 @@
     android:layout_height="wrap_content"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingLeft="16dp"
-    android:paddingRight="16dp">
+    android:background="@drawable/tab_layout_background_dark"
+    android:layout_marginBottom="8dp"
+    android:padding="12dp">
 
     <ImageView
         android:id="@+id/IVIcon"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:layout_marginTop="8dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_marginEnd="16dp"
-        android:layout_marginBottom="8dp"
-        app:tint="@color/colorPrimaryDark" />
+        android:padding="8dp"
+        android:background="@drawable/circle_background"
+        app:tint="@color/white" />
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_weight="1"
-        android:layout_height="match_parent"
-        android:layout_gravity="center"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
         android:orientation="vertical">
 
         <TextView
             android:id="@+id/TVVersionName"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_gravity="center"
-            android:gravity="start|center"
+            android:layout_height="wrap_content"
+            android:textColor="@color/white"
+            android:textSize="16sp"
+            android:textStyle="bold"
             android:maxLines="1" />
 
         <TextView
             android:id="@+id/TVVersionCode"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_gravity="center"
-            android:gravity="start|center"
+            android:layout_height="wrap_content"
+            android:textColor="@color/gray"
+            android:textSize="12sp"
             android:maxLines="1" />
     </LinearLayout>
 
     <ImageButton
-        android:id="@+id/BTMenu"
-        style="@style/ListMenuButton"
-        android:layout_marginStart="8dp"
-        android:src="@drawable/icon_list_item_menu" />
-
-    <ImageButton
         android:id="@+id/BTDownload"
-        style="@style/ListMenuButton"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:layout_marginStart="8dp"
-        android:src="@drawable/icon_popup_menu_download" />
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/icon_popup_menu_download"
+        app:tint="@color/white"
+        android:visibility="gone" />
+
     <ProgressBar
         android:id="@+id/Progress"
-        style="@style/ListMenuButton"
-        android:layout_marginStart="8dp"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
         android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/BTMenu"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/icon_list_item_menu"
+        app:tint="@color/white" />
+
 </LinearLayout>

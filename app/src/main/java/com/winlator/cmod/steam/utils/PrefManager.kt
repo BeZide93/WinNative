@@ -1,0 +1,105 @@
+package com.winlator.cmod.steam.utils
+
+import android.content.Context
+import android.content.SharedPreferences
+
+object PrefManager {
+    private var prefs: SharedPreferences? = null
+
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("PluviaPreferences", Context.MODE_PRIVATE)
+    }
+
+    private fun getString(key: String, defaultValue: String): String = prefs?.getString(key, defaultValue) ?: defaultValue
+    private fun setString(key: String, value: String) { prefs?.edit()?.putString(key, value)?.apply() }
+    
+    private fun getInt(key: String, defaultValue: Int): Int = prefs?.getInt(key, defaultValue) ?: defaultValue
+    private fun setInt(key: String, value: Int) { prefs?.edit()?.putInt(key, value)?.apply() }
+    
+    private fun getLong(key: String, defaultValue: Long): Long = prefs?.getLong(key, defaultValue) ?: defaultValue
+    private fun setLong(key: String, value: Long) { prefs?.edit()?.putLong(key, value)?.apply() }
+    
+    private fun getBoolean(key: String, defaultValue: Boolean): Boolean = prefs?.getBoolean(key, defaultValue) ?: defaultValue
+    private fun setBoolean(key: String, value: Boolean) { prefs?.edit()?.putBoolean(key, value)?.apply() }
+
+    var username: String
+        get() = getString("user_name", "")
+        set(value) { setString("user_name", value) }
+
+    var refreshToken: String
+        get() = getString("refresh_token", "")
+        set(value) { setString("refresh_token", value) }
+
+    var accessToken: String
+        get() = getString("access_token", "")
+        set(value) { setString("access_token", value) }
+
+    var steamUserSteamId64: Long
+        get() = getLong("steam_user_steam_id_64", 0L)
+        set(value) { setLong("steam_user_steam_id_64", value) }
+
+    var steamUserAccountId: Int
+        get() = getInt("steam_user_account_id", 0)
+        set(value) { setInt("steam_user_account_id", value) }
+
+    var cellId: Int
+        get() = getInt("cell_id", 0)
+        set(value) { setInt("cell_id", value) }
+
+    var cellIdManuallySet: Boolean
+        get() = getBoolean("cell_id_manually_set", false)
+        set(value) { setBoolean("cell_id_manually_set", value) }
+
+    var downloadOnWifiOnly: Boolean
+        get() = getBoolean("download_on_wifi_only", true)
+        set(value) { setBoolean("download_on_wifi_only", value) }
+        
+    var lastPICSChangeNumber: Int
+        get() = getInt("last_pics_change_number", 0)
+        set(value) { setInt("last_pics_change_number", value) }
+
+    var steamUserName: String
+        get() = getString("steam_user_name", "")
+        set(value) { setString("steam_user_name", value) }
+
+    var steamUserAvatarHash: String
+        get() = getString("steam_user_avatar_hash", "")
+        set(value) { setString("steam_user_avatar_hash", value) }
+
+    var personaState: Int
+        get() = getInt("persona_state", 0)
+        set(value) { setInt("persona_state", value) }
+
+    var externalStoragePath: String
+        get() = getString("external_storage_path", "")
+        set(value) { setString("external_storage_path", value) }
+
+    var useExternalStorage: Boolean
+        get() = getBoolean("use_external_storage", false)
+        set(value) { setBoolean("use_external_storage", value) }
+        
+    var containerLanguage: String
+        get() = getString("container_language", "english")
+        set(value) { setString("container_language", value) }
+        
+    var downloadSpeed: Int
+        get() = getInt("download_speed", 24)
+        set(value) { setInt("download_speed", value) }
+        
+    var clientId: Long
+        get() = getLong("client_id", 0L)
+        set(value) { setLong("client_id", value) }
+
+    var aioStoreMode: Boolean
+        get() = getBoolean("aio_store_mode", true)
+        set(value) { setBoolean("aio_store_mode", value) }
+
+    fun clearPreferences() {
+        prefs?.edit()?.clear()?.apply()
+    }
+    
+    // Legacy support for Winlator properties if needed
+    var graphicsDriver: String
+        get() = getString("graphics_driver", "virgl")
+        set(value) { setString("graphics_driver", value) }
+}

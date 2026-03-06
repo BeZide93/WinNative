@@ -95,7 +95,12 @@ public class ContentsFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle(R.string.contents);
+        if (getActivity() != null && ((AppCompatActivity) getActivity()).getSupportActionBar() != null) {
+            ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle(R.string.components);
+        }
+        
+        TextView tvTitle = view.findViewById(R.id.TVTitle);
+        if (tvTitle != null) tvTitle.setText(R.string.components);
     }
 
     @Nullable

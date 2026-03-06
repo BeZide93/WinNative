@@ -45,6 +45,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.GravityCompat;
+import com.winlator.cmod.steam.utils.SteamUtils;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.preference.PreferenceManager;
 
@@ -475,6 +476,20 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         Log.d("XServerDisplayActivity", "Intent Extras: " + intent.getExtras());
 
         if (shortcut != null) {
+            String containerIdOverride = shortcut.getExtra("container_id");
+            if (!containerIdOverride.isEmpty()) {
+                int newContainerId = Integer.parseInt(containerIdOverride);
+                if (newContainerId != container.id) {
+                    container = containerManager.getContainerById(newContainerId);
+                    if (container == null) {
+                        Log.e("XServerDisplayActivity", "Failed to retrieve overridden container with ID: " + newContainerId);
+                        finish();
+                        return;
+                    }
+                    containerManager.activateContainer(container);
+                }
+            }
+
             graphicsDriver = shortcut.getExtra("graphicsDriver", container.getGraphicsDriver());
             graphicsDriverConfig = shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig());
             audioDriver = shortcut.getExtra("audioDriver", container.getAudioDriver());
@@ -483,8 +498,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             dxwrapperConfig = shortcut.getExtra("dxwrapperConfig", container.getDXWrapperConfig());
             screenSize = shortcut.getExtra("screenSize", container.getScreenSize());
             lc_all = shortcut.getExtra("lc_all", container.getLC_ALL());
+            midiSoundFont = shortcut.getExtra("midiSoundFont", container.getMIDISoundFont());
             String inputType = shortcut.getExtra("inputType");
-            if (!inputType.isEmpty()) winHandler.setInputType(Byte.parseByte(inputType));
+            if (!inputType.isEmpty()) winHandler.setInputType((byte)Integer.parseInt(inputType));
             String xinputDisabledString = shortcut.getExtra("disableXinput", "false");
             xinputDisabledFromShortcut = parseBoolean(xinputDisabledString);
             // Pass the value to WinHandler
@@ -496,6 +512,10 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 vkbasaltConfig = "effects=" + sharpnessEffect.toLowerCase() + ";" + "casSharpness=" + sharpnessLevel / 100 + ";" + "dlsSharpness=" + sharpnessLevel / 100  + ";" + "dlsDenoise=" + sharpnessDenoise / 100 + ";" + "enableOnLaunch=True";
             }
             Log.d("XServerDisplayActivity", "XInput Disabled from Shortcut: " + xinputDisabledFromShortcut);
+            
+            startupSelection = shortcut.getExtra("startupSelection", String.valueOf(container.getStartupSelection()));
+        } else {
+            startupSelection = String.valueOf(container.getStartupSelection());
         }
 
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
@@ -1001,12 +1021,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             containerDataChanged = true;
         }
 
-        String dxwrapper = this.dxwrapper;
+        String dxwrapper = shortcut != null ? shortcut.getExtra("dxwrapper", this.dxwrapper) : this.dxwrapper;
 
         if (dxwrapper.contains("dxvk")) {
-            String dxvkWrapper = "dxvk-" + dxwrapperConfig.get("version");
-            String vkd3dWrapper = "vkd3d-" + dxwrapperConfig.get("vkd3dVersion");
-            String ddrawrapper = dxwrapperConfig.get("ddrawrapper");
+            String dxwrapperConfig = shortcut != null ? shortcut.getExtra("dxwrapperConfig", this.dxwrapperConfig.toString()) : this.dxwrapperConfig.toString();
+            KeyValueSet currentDXWrapperConfig = DXVKConfigDialog.parseConfig(dxwrapperConfig);
+            String dxvkWrapper = "dxvk-" + currentDXWrapperConfig.get("version");
+            String vkd3dWrapper = "vkd3d-" + currentDXWrapperConfig.get("vkd3dVersion");
+            String ddrawrapper = currentDXWrapperConfig.get("ddrawrapper");
             dxwrapper = dxvkWrapper + ";" + vkd3dWrapper + ";" + ddrawrapper;
         }
 
@@ -1023,7 +1045,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             containerDataChanged = true;
         }
 
-        String desktopTheme = container.getDesktopTheme();
+        String desktopTheme = shortcut != null ? shortcut.getExtra("desktopTheme", container.getDesktopTheme()) : container.getDesktopTheme();
         if (!(desktopTheme+","+xServer.screenInfo).equals(container.getExtra("desktopTheme"))) {
             WineThemeManager.apply(this, new WineThemeManager.ThemeInfo(desktopTheme), xServer.screenInfo);
             container.putExtra("desktopTheme", desktopTheme+","+xServer.screenInfo);
@@ -1827,24 +1849,31 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         String args = "";
 
         if (shortcut != null) {
-            String execArgs = shortcut.getExtra("execArgs");
-            execArgs = !execArgs.isEmpty() ? " " + execArgs : "";
-
-            if (shortcut.path.endsWith(".lnk")) {
-                args += "\"" + shortcut.path + "\"" + execArgs;
+            String gameSource = shortcut.getExtra("game_source");
+            if (gameSource.equals("STEAM")) {
+                int appId = Integer.parseInt(shortcut.getExtra("app_id"));
+                SteamUtils.writeColdClientIni(appId, container);
+                args = "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamclient_loader_x64.exe\"";
             } else {
-                String exeDir = FileUtils.getDirname(shortcut.path);
-                String filename = FileUtils.getName(shortcut.path);
+                String execArgs = shortcut.getExtra("execArgs");
+                execArgs = !execArgs.isEmpty() ? " " + execArgs : "";
 
-                int dotIndex = filename.lastIndexOf(".");
-                int spaceIndex = (dotIndex != -1) ? filename.indexOf(" ", dotIndex) : -1;
+                if (shortcut.path.endsWith(".lnk")) {
+                    args += "\"" + shortcut.path + "\"" + execArgs;
+                } else {
+                    String exeDir = FileUtils.getDirname(shortcut.path);
+                    String filename = FileUtils.getName(shortcut.path);
 
-                if (spaceIndex != -1) {
-                    execArgs = filename.substring(spaceIndex + 1) + execArgs;
-                    filename = filename.substring(0, spaceIndex);
+                    int dotIndex = filename.lastIndexOf(".");
+                    int spaceIndex = (dotIndex != -1) ? filename.indexOf(" ", dotIndex) : -1;
+
+                    if (spaceIndex != -1) {
+                        execArgs = filename.substring(spaceIndex + 1) + execArgs;
+                        filename = filename.substring(0, spaceIndex);
+                    }
+
+                    args += "/dir " + StringUtils.escapeDOSPath(exeDir) + " \"" + filename + "\"" + execArgs;
                 }
-
-                args += "/dir " + StringUtils.escapeDOSPath(exeDir) + " \"" + filename + "\"" + execArgs;
             }
         } else {
             // Append EXTRA_EXEC_ARGS from overrideEnvVars if it exists

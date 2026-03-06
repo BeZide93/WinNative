@@ -11,3 +11,21 @@ app/src/main/assets/imagefs.txz
 app/src/main/assets/proton-9.0-arm64ec.txz
 app/src/main/assets/proton-9.0-x86_64.txz
 
+# Logs
+*.log
+**/*.log
+
+# Kotlin/Gradle artifacts
+.kotlin/
+.gradle/
+build/
+app/build/
+app/.cxx/
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Local properties
+local.properties
+

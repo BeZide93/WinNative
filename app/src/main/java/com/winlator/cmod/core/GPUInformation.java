@@ -19,6 +19,11 @@ public abstract class GPUInformation {
     public native static String getVulkanVersion(String driverName, Context context);
     public native static int getVendorID(String driverName, Context context);
     public native static String getRenderer(String driverName, Context context);
+
+    public static String getRenderer(Context context) {
+        return getRenderer(null, context);
+    }
+
     public native static String[] enumerateExtensions(String driverName, Context context);
 
     static {

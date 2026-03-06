@@ -76,7 +76,9 @@ public class ShortcutsFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         manager = new ContainerManager(getContext());
         loadShortcutsList();
-        ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(R.string.shortcuts);
+        if (getActivity() != null && ((AppCompatActivity)getActivity()).getSupportActionBar() != null) {
+            ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(R.string.shortcuts);
+        }
     }
 
     @Nullable
@@ -109,7 +111,7 @@ public class ShortcutsFragment extends Fragment {
         private final List<Shortcut> data;
 
         private class ViewHolder extends RecyclerView.ViewHolder {
-            private final ImageButton menuButton;
+            private final ImageView menuButton;
             private final ImageView imageView;
             private final TextView title;
             private final TextView subtitle;
@@ -165,7 +167,14 @@ public class ShortcutsFragment extends Fragment {
             listItemMenu.inflate(R.menu.shortcut_popup_menu);
             listItemMenu.setOnMenuItemClickListener((menuItem) -> {
                 int itemId = menuItem.getItemId();
-                if (itemId == R.id.shortcut_settings) {
+                if (itemId == R.id.shortcut_game_settings) {
+                    getParentFragmentManager().beginTransaction()
+                            .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
+                            .addToBackStack(null)
+                            .replace(R.id.FLFragmentContainer, new ContainerDetailFragment(shortcut))
+                            .commit();
+                }
+                else if (itemId == R.id.shortcut_settings) {
                     (new ShortcutSettingsDialog(ShortcutsFragment.this, shortcut)).show();
                 }
                 else if (itemId == R.id.shortcut_remove) {

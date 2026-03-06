@@ -113,7 +113,9 @@ public class SettingsFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         // Apply dynamic styles to all labels
         applyDynamicStylesRecursively(view);
-        ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(R.string.settings);
+        if (getActivity() != null && ((AppCompatActivity)getActivity()).getSupportActionBar() != null) {
+            ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(R.string.presets);
+        }
     }
 
 
@@ -308,6 +310,41 @@ public class SettingsFragment extends Fragment {
             ContentDialog.confirm(context, R.string.do_you_want_to_reinstall_imagefs, () -> ImageFsInstaller.installFromAssets((MainActivity) getActivity()));
         });
 
+        // Steam Integration
+        Button btSteamLogin = view.findViewById(R.id.BTSteamLogin);
+        Button btSteamLibrary = view.findViewById(R.id.BTSteamLibrary);
+        TextView tvSteamStatus = view.findViewById(R.id.TVSteamStatus);
+
+        Runnable updateSteamUI = () -> {
+            boolean isLoggedIn = com.winlator.cmod.steam.service.SteamService.Companion.isLoggedIn();
+            if (isLoggedIn) {
+                tvSteamStatus.setText("Status: Logged In as " + com.winlator.cmod.steam.utils.PrefManager.INSTANCE.getUsername());
+                btSteamLogin.setText("Logout from Steam");
+            } else {
+                tvSteamStatus.setText("Status: Not Logged In");
+                btSteamLogin.setText("Login to Steam");
+            }
+        };
+        updateSteamUI.run();
+
+        btSteamLogin.setOnClickListener(v -> {
+            if (com.winlator.cmod.steam.service.SteamService.Companion.isLoggedIn()) {
+                com.winlator.cmod.steam.service.SteamService.Companion.logOut();
+                updateSteamUI.run();
+                com.winlator.cmod.core.AppUtils.showToast(context, "Logged out of Steam");
+            } else {
+                startActivity(new Intent(context, com.winlator.cmod.steam.SteamLoginActivity.class));
+            }
+        });
+
+        btSteamLibrary.setOnClickListener(v -> {
+            if (!com.winlator.cmod.steam.service.SteamService.Companion.isLoggedIn()) {
+                com.winlator.cmod.core.AppUtils.showToast(context, "Please login first");
+                return;
+            }
+            com.winlator.cmod.core.AppUtils.showToast(context, "Steam Library Feature is active");
+        });
+
         view.findViewById(R.id.BTConfirm).setOnClickListener((v) -> {
             SharedPreferences.Editor editor = preferences.edit();
 
@@ -376,44 +413,7 @@ public class SettingsFragment extends Fragment {
     }
 
     private void applyDynamicStylesRecursively(View view) {
-        TextView box64Label = view.findViewById(R.id.TVBox64);
-        applyFieldSetLabelStyle(box64Label, isDarkMode);
-
-        TextView fexcoreLabel = view.findViewById(R.id.TVFEXCore);
-        applyFieldSetLabelStyle(fexcoreLabel, isDarkMode);
-
-        TextView soundLabel = view.findViewById(R.id.TVSound);
-        applyFieldSetLabelStyle(soundLabel, isDarkMode);
-
-        TextView themeLabel = view.findViewById(R.id.TVTheme);
-        applyFieldSetLabelStyle(themeLabel, isDarkMode);
-
-        TextView shortcutSettingsLabel = view.findViewById(R.id.TVShortcutSettings);
-        applyFieldSetLabelStyle(shortcutSettingsLabel, isDarkMode);
-
-        TextView bigPictureModeLabel = view.findViewById(R.id.TVBigPictureMode);
-        applyFieldSetLabelStyle(bigPictureModeLabel, isDarkMode);
-
-        TextView tvCustomApiKey = view.findViewById(R.id.TVCustomApiKey);
-        applyFieldSetLabelStyle(tvCustomApiKey, isDarkMode);
-
-//        TextView shortcutSettingsLabel = view.findViewById(R.id.TVShortcutSettings);
-//        applyFieldSetLabelStyle(shortcutSettingsLabel, isDarkMode);
-
-        // Inputs tab labels
-        TextView xServerLabel = view.findViewById(R.id.TVXServer);
-        applyFieldSetLabelStyle(xServerLabel, isDarkMode);
-
-        // Advanced tab labels
-        TextView logsLabel = view.findViewById(R.id.TVLogs);
-        applyFieldSetLabelStyle(logsLabel, isDarkMode);
-
-        TextView experimentalLabel = view.findViewById(R.id.TVExperimental);
-        applyFieldSetLabelStyle(experimentalLabel, isDarkMode);
-
-        TextView ImageFsLabel = view.findViewById(R.id.TVImageFs);
-        applyFieldSetLabelStyle(ImageFsLabel, isDarkMode);
-
+        // Obsolete UI IDs removed
     }
 
     private void applyFieldSetLabelStyle(TextView textView, boolean isDarkMode) {

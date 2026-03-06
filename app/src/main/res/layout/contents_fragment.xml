@@ -1,41 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:background="@color/window_background_color_dark"
+    android:padding="16.dp">
 
     <TextView
+        android:id="@+id/TVTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/content_type" />
+        android:text="@string/components"
+        android:textColor="@color/white"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:background="@drawable/tab_layout_background_dark"
+        android:padding="8dp"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/content_type"
+            android:textColor="@color/white"
+            android:layout_marginEnd="12dp"
+            android:textStyle="bold" />
 
         <Spinner
             android:id="@+id/SContentType"
             style="@style/ComboBox"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1" />
+            android:layout_weight="1"
+            android:backgroundTint="@color/white" />
 
     </LinearLayout>
 
-
-    <View style="@style/HorizontalLine" />
-
-    <androidx.recyclerview.widget.RecyclerView xmlns:app="http://schemas.android.com/apk/res-auto"
+    <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/RecyclerView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:scrollbars="vertical"
-        app:layoutManager="LinearLayoutManager" />
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
 
     <TextView
         android:id="@+id/TVEmptyText"
@@ -44,23 +59,19 @@
         android:layout_weight="1"
         android:gravity="center"
         android:text="@string/no_items_to_display"
-        android:textSize="24sp"
+        android:textColor="@color/white"
+        android:textSize="18sp"
         android:visibility="gone" />
 
-    <View style="@style/HorizontalLine" />
-
-    <LinearLayout
+    <Button
+        android:id="@+id/BTInstallContent"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:layout_height="56dp"
+        android:text="@string/install_content"
+        android:textColor="@color/white"
+        android:backgroundTint="#1A9FFF"
+        android:layout_marginTop="16dp"
+        android:textAllCaps="true"
+        android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/BTInstallContent"
-            style="@style/ButtonNeutral"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/install_content" />
-
-    </LinearLayout>
 </LinearLayout>

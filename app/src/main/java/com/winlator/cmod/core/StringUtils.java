@@ -29,6 +29,7 @@ public class StringUtils {
     }
 
     public static String parseIdentifier(Object text) {
+        if (text == null) return "";
         return text.toString().toLowerCase(Locale.ENGLISH).replaceAll(" *\\(([^\\)]+)\\)$", "").replaceAll("( \\+ )+| +", "-");
     }
 

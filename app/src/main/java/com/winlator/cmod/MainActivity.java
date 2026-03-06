@@ -42,6 +42,7 @@ import com.winlator.cmod.core.Callback;
 import com.winlator.cmod.core.ImageUtils;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.container.ContainerManager;
+import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.core.WineThemeManager;
 import com.winlator.cmod.xenvironment.ImageFsInstaller;
 
@@ -56,6 +57,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     public static final byte OPEN_DIRECTORY_REQUEST_CODE = 4;
     public static final byte OPEN_IMAGE_REQUEST_CODE = 5;
     private DrawerLayout drawerLayout;
+    private NavigationView navigationView;
     public final PreloaderDialog preloaderDialog = new PreloaderDialog(this);
     private boolean editInputControls = false;
     private int selectedProfileId;
@@ -94,20 +96,11 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
         setContentView(R.layout.main_activity);
 
-        drawerLayout = findViewById(R.id.DrawerLayout);
-        NavigationView navigationView = findViewById(R.id.NavigationView);
+        navigationView = findViewById(R.id.NavigationView);
         navigationView.setNavigationItemSelectedListener(this);
 
-        setSupportActionBar(findViewById(R.id.Toolbar));
-        ActionBar actionBar = getSupportActionBar();
-        if (actionBar != null) {
-            actionBar.setDisplayHomeAsUpEnabled(true);
-            actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_menu);
-        }
-
-        // Determine text color based on dark mode
-        int textColor = isDarkMode ? Color.WHITE : Color.BLACK;
-        setNavigationViewItemTextColor(navigationView, textColor);
+        // Background is dark (#1B2838), so text color from XML app:itemTextColor="@color/white" is correct.
+        // We do not override it here.
 
         // Create Winlator folder if not present
         File winlatorDir = new File(SettingsFragment.DEFAULT_WINLATOR_PATH);
@@ -116,34 +109,61 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
         containerManager = new ContainerManager(this);
 
-        Intent intent = getIntent();
+        handleIntent(getIntent());
+
+        if (!requestAppPermissions()) {
+            ImageFsInstaller.installIfNeeded(this);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            showAllFilesAccessDialog();
+        }
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 0);
+            }
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent == null) return;
+        String editShortcutPath = intent.getStringExtra("edit_shortcut_path");
+        if (editShortcutPath != null) {
+            File shortcutFile = new File(editShortcutPath);
+            for (Shortcut shortcut : containerManager.loadShortcuts()) {
+                if (shortcut.file.getPath().equals(shortcutFile.getPath())) {
+                    show(new ContainerDetailFragment(shortcut), false);
+                    return;
+                }
+            }
+        }
+
+        int createShortcutForAppId = intent.getIntExtra("create_shortcut_for_app_id", 0);
+        if (createShortcutForAppId > 0) {
+            String createShortcutForAppName = intent.getStringExtra("create_shortcut_for_app_name");
+            show(new ContainerDetailFragment(0, createShortcutForAppId, createShortcutForAppName), false);
+            return;
+        }
+
         editInputControls = intent.getBooleanExtra("edit_input_controls", false);
         if (editInputControls) {
             selectedProfileId = intent.getIntExtra("selected_profile_id", 0);
-            actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_back);
             onNavigationItemSelected(navigationView.getMenu().findItem(R.id.main_menu_input_controls));
             navigationView.setCheckedItem(R.id.main_menu_input_controls);
         } else {
             int selectedMenuItemId = intent.getIntExtra("selected_menu_item_id", 0);
             int menuItemId = selectedMenuItemId > 0 ? selectedMenuItemId : R.id.main_menu_containers;
 
-            actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_menu);
             onNavigationItemSelected(navigationView.getMenu().findItem(menuItemId));
             navigationView.setCheckedItem(menuItemId);
-
-            if (!requestAppPermissions()) {
-                ImageFsInstaller.installIfNeeded(this);
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-                showAllFilesAccessDialog();
-            }
-
-            if (Build.VERSION.SDK_INT >= 33) {
-                if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 0);
-                }
-            }
         }
     }
 
@@ -173,6 +193,11 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     @Override
     public void onBackPressed() {
+        if (getIntent().getBooleanExtra("return_to_unified", false)) {
+            finish();
+            return;
+        }
+
         FragmentManager fragmentManager = getSupportFragmentManager();
         List<Fragment> fragments = fragmentManager.getFragments();
         for (Fragment fragment : fragments) {
@@ -207,16 +232,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
         if (menuItem.getItemId() == android.R.id.home) {
-            if (editInputControls) {
-                onBackPressed();
-                return true;
-            }
-
-            if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                drawerLayout.closeDrawer(GravityCompat.START);
-            } else {
-                drawerLayout.openDrawer(GravityCompat.START);
-            }
+            onBackPressed();
             return true;
         } else {
             return super.onOptionsItemSelected(menuItem);
@@ -224,24 +240,20 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     }
 
     public void toggleDrawer() {
-        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START);
-        } else {
-            drawerLayout.openDrawer(GravityCompat.START);
-        }
+        // Drawer removed in new UI
     }
 
     @Override
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
+        if (item == null) return false;
+        
         FragmentManager fragmentManager = getSupportFragmentManager();
         if (fragmentManager.getBackStackEntryCount() > 0) {
             fragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
         }
 
         switch (item.getItemId()) {
-            case R.id.main_menu_shortcuts:
-                show(new ShortcutsFragment(), false);  // Forward animation
-                break;
+
             case R.id.main_menu_containers:
                 show(new ContainersFragment(), false);  // Forward animation
                 break;
@@ -253,6 +265,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 break;
             case R.id.main_menu_adrenotools_gpu_drivers:
                 show(new AdrenotoolsFragment(), false);
+                break;
+            case R.id.main_menu_stores:
+                show(new StoresFragment(), false);
                 break;
             case R.id.main_menu_settings:
                 show(new SettingsFragment(), false);  // Forward animation
@@ -271,7 +286,6 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 //                .replace(R.id.FLFragmentContainer, fragment)
 //                .commit();
 //
-//        drawerLayout.closeDrawer(GravityCompat.START);
 //    }
 
     private void show(Fragment fragment, boolean reverse) {
@@ -287,8 +301,6 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                     .replace(R.id.FLFragmentContainer, fragment)
                     .commit();
         }
-
-        drawerLayout.closeDrawer(GravityCompat.START);
     }
 
     private void showAboutDialog() {
@@ -342,27 +354,6 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
 
         dialog.show();
-    }
-
-    private void setNavigationViewItemTextColor(NavigationView navigationView, int color) {
-        for (int i = 0; i < navigationView.getMenu().size(); i++) {
-            MenuItem menuItem = navigationView.getMenu().getItem(i);
-            setMenuItemTextColor(menuItem, color);
-
-            // If the menu item has sub-items, iterate through them
-            if (menuItem.hasSubMenu()) {
-                for (int j = 0; j < menuItem.getSubMenu().size(); j++) {
-                    MenuItem subMenuItem = menuItem.getSubMenu().getItem(j);
-                    setMenuItemTextColor(subMenuItem, color);
-                }
-            }
-        }
-    }
-
-    private void setMenuItemTextColor(MenuItem menuItem, int color) {
-        SpannableString spanString = new SpannableString(menuItem.getTitle());
-        spanString.setSpan(new ForegroundColorSpan(color), 0, spanString.length(), 0);
-        menuItem.setTitle(spanString);
     }
 
     @Override
