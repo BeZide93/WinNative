@@ -502,40 +502,41 @@ public class ContainerDetailFragment extends Fragment {
                 String name = etName.getText().toString();
                 String screenSize = getScreenSize(view);
                 String envVars = envVarsView.getEnvVars();
-                String graphicsDriver = StringUtils.parseIdentifier(sGraphicsDriver.getSelectedItem());
-                String graphicsDriverConfig = vGraphicsDriverConfig.getTag().toString();
+                String graphicsDriver = sGraphicsDriver.getSelectedItem() != null ? StringUtils.parseIdentifier(sGraphicsDriver.getSelectedItem()) : "";
+                String graphicsDriverConfig = vGraphicsDriverConfig.getTag() != null ? vGraphicsDriverConfig.getTag().toString() : "";
                 HashMap<String, String> config = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
-                if (config.get("version").isEmpty()) {
+                if (config.get("version") == null || config.get("version").isEmpty()) {
                     config.put("version", GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, context) ? DefaultVersion.WRAPPER_ADRENO : DefaultVersion.WRAPPER);
                     graphicsDriverConfig = GraphicsDriverConfigDialog.toGraphicsDriverConfig(config);
                 }
-                String dxwrapper = StringUtils.parseIdentifier(sDXWrapper.getSelectedItem());
-                String dxwrapperConfig = vDXWrapperConfig.getTag().toString();
-                String audioDriver = StringUtils.parseIdentifier(sAudioDriver.getSelectedItem());
-                String emulator = StringUtils.parseIdentifier(sEmulator.getSelectedItem());
+                String dxwrapper = sDXWrapper.getSelectedItem() != null ? StringUtils.parseIdentifier(sDXWrapper.getSelectedItem()) : "";
+                String dxwrapperConfig = vDXWrapperConfig.getTag() != null ? vDXWrapperConfig.getTag().toString() : "";
+                String audioDriver = sAudioDriver.getSelectedItem() != null ? StringUtils.parseIdentifier(sAudioDriver.getSelectedItem()) : "";
+                String emulator = sEmulator.getSelectedItem() != null ? StringUtils.parseIdentifier(sEmulator.getSelectedItem()) : "";
                 String wincomponents = getWinComponents(view);
                 String drives = getDrives(view);
                 boolean showFPS = cbShowFPS.isChecked();
                 boolean fullscreenStretched = cbFullscreenStretched.isChecked();
                 String cpuList = cpuListView.getCheckedCPUListAsString();
                 String cpuListWoW64 = cpuListViewWoW64.getCheckedCPUListAsString();
-                byte startupSelection = (byte) sStartupSelection.getSelectedItemPosition();
+                byte startupSelection = (byte) Math.max(0, sStartupSelection.getSelectedItemPosition());
                 String box64Version = sBox64Version.getSelectedItem() != null ? sBox64Version.getSelectedItem().toString() : DefaultVersion.BOX64;
                 String fexcoreVersion = sFEXCoreVersion.getSelectedItem() != null ? sFEXCoreVersion.getSelectedItem().toString() : DefaultVersion.FEXCORE;
                 String fexcorePreset = FEXCorePresetManager.getSpinnerSelectedId(sFEXCorePreset);
                 String box64Preset = Box64PresetManager.getSpinnerSelectedId(sBox64Preset);
                 String desktopTheme = getDesktopTheme(view);
                 // Capture missing properties
-                String midiSoundFont = sMIDISoundFont.getSelectedItemPosition() == 0 ? "" : sMIDISoundFont.getSelectedItem().toString();
+                String midiSoundFont = (sMIDISoundFont.getSelectedItemPosition() <= 0 || sMIDISoundFont.getSelectedItem() == null) ? "" : sMIDISoundFont.getSelectedItem().toString();
                 String lc_all = etLC_ALL.getText().toString();
-                int primaryController = sPrimaryController.getSelectedItemPosition();
+                int primaryController = Math.max(0, sPrimaryController.getSelectedItemPosition());
                 String controllerMapping = getControllerMapping(view);
 
                 // Define final input type
                 int finalInputType = 0;
                 finalInputType |= cbEnableXInput.isChecked() ? WinHandler.FLAG_INPUT_TYPE_XINPUT : 0;
                 finalInputType |= cbEnableDInput.isChecked() ? WinHandler.FLAG_INPUT_TYPE_DINPUT : 0;
-                finalInputType |= SDInputType.getSelectedItemPosition() == 0 ? WinHandler.FLAG_DINPUT_MAPPER_STANDARD : WinHandler.FLAG_DINPUT_MAPPER_XINPUT;
+                int rawDInputPos = SDInputType.getSelectedItemPosition();
+                finalInputType |= (rawDInputPos <= 0) ? WinHandler.FLAG_DINPUT_MAPPER_STANDARD : WinHandler.FLAG_DINPUT_MAPPER_XINPUT;
 
                 // Handle SDL2 environment variables based on the toggle state
                 if (cbSdl2Toggle.isChecked()) {
@@ -691,7 +692,9 @@ public class ContainerDetailFragment extends Fragment {
         if (!userRegFile.exists()) return;
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
             Spinner sMouseWarpOverride = view.findViewById(R.id.SMouseWarpOverride);
-            registryEditor.setStringValue("Software\\Wine\\DirectInput", "MouseWarpOverride", sMouseWarpOverride.getSelectedItem().toString().toLowerCase(Locale.ENGLISH));
+            if (sMouseWarpOverride != null && sMouseWarpOverride.getSelectedItem() != null) {
+                registryEditor.setStringValue("Software\\Wine\\DirectInput", "MouseWarpOverride", sMouseWarpOverride.getSelectedItem().toString().toLowerCase(Locale.ENGLISH));
+            }
         }
     }
 

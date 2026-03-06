@@ -14,6 +14,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -43,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -491,6 +493,7 @@ class UnifiedActivity : ComponentActivity() {
                                     RoundedCornerShape(12.dp),
                                     spotColor = if (isCentered) Color.Black.copy(alpha = 0.6f) else Color.Transparent
                                 )
+                                .then(if (isCentered) Modifier.border(4.dp, Accent.copy(alpha = 0.8f), RoundedCornerShape(12.dp)) else Modifier)
                         )
                     }
                 }
@@ -648,12 +651,17 @@ class UnifiedActivity : ComponentActivity() {
     fun SteamStoreCapsule(app: SteamApp, onClick: () -> Unit) {
         val isInstalled = SteamService.isAppInstalled(app.id)
         val context = LocalContext.current
+        var isFocused by remember { mutableStateOf(false) }
+        val borderColor = if (isFocused) Accent.copy(alpha = 0.8f) else Color.Transparent
 
         Column(
             modifier = Modifier
                 .width(160.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(CardDark)
+                .border(4.dp, borderColor, RoundedCornerShape(16.dp))
+                .onFocusChanged { isFocused = it.isFocused }
+                .focusable()
                 .clickable(onClick = onClick)
         ) {
             Box {
@@ -726,6 +734,8 @@ class UnifiedActivity : ComponentActivity() {
         val appId = id.removePrefix("STEAM_").toIntOrNull() ?: 0
         var app by remember(appId) { mutableStateOf<SteamApp?>(null) }
         val context = LocalContext.current
+        var isFocused by remember { mutableStateOf(false) }
+        val borderColor = if (isFocused) Accent.copy(alpha = 0.8f) else Color.Transparent
 
         LaunchedEffect(appId) {
             withContext(Dispatchers.IO) { app = db.steamAppDao().findApp(appId) }
@@ -734,7 +744,12 @@ class UnifiedActivity : ComponentActivity() {
         Surface(
             color = CardDark,
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(4.dp, borderColor, RoundedCornerShape(12.dp))
+                .onFocusChanged { isFocused = it.isFocused }
+                .focusable()
+                .clickable { /* Handle click if necessary */ }
         ) {
             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 AsyncImage(
