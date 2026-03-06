@@ -12,6 +12,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -162,18 +163,20 @@ class UnifiedActivity : ComponentActivity() {
                 }
 
                 // ── Bottom-left filter button ──
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(16.dp)
-                        .size(48.dp)
-                        .shadow(8.dp, CircleShape, spotColor = Color.Black.copy(alpha = 0.5f))
-                        .clip(CircleShape)
-                        .background(SurfaceDark)
-                        .clickable { showFilter = !showFilter },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.FilterList, contentDescription = "Filter", tint = TextPrimary, modifier = Modifier.size(24.dp))
+                if (key != "downloads") {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
+                            .size(48.dp)
+                            .shadow(8.dp, CircleShape, spotColor = Color.Black.copy(alpha = 0.5f))
+                            .clip(CircleShape)
+                            .background(SurfaceDark)
+                            .clickable { showFilter = !showFilter },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.FilterList, contentDescription = "Filter", tint = TextPrimary, modifier = Modifier.size(24.dp))
+                    }
                 }
 
                 // ── Filter panel ──
@@ -1083,22 +1086,34 @@ class UnifiedActivity : ComponentActivity() {
                     Spacer(Modifier.height(12.dp))
 
                     // AIO Mode toggle
-                    FilterToggleRow("AIO Store Mode", aioMode) { onAioToggle(it) }
+                    FilterButton("AIO Store Mode", aioMode, Modifier.fillMaxWidth()) { onAioToggle(it) }
 
                     Spacer(Modifier.height(16.dp))
                     Text("STORES", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     Spacer(Modifier.height(8.dp))
 
-                    listOf("steam" to "Steam", "epic" to "Epic", "gog" to "GOG", "amazon" to "Amazon").forEach { (key, label) ->
-                        FilterToggleRow(label, storeVisible[key] ?: true) { storeVisible[key] = it }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterButton("Steam", storeVisible["steam"] == true, Modifier.weight(1f)) { storeVisible["steam"] = it }
+                        FilterButton("Epic", storeVisible["epic"] == true, Modifier.weight(1f)) { storeVisible["epic"] = it }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterButton("GOG", storeVisible["gog"] == true, Modifier.weight(1f)) { storeVisible["gog"] = it }
+                        FilterButton("Amazon", storeVisible["amazon"] == true, Modifier.weight(1f)) { storeVisible["amazon"] = it }
                     }
 
                     Spacer(Modifier.height(16.dp))
                     Text("CONTENT TYPES", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     Spacer(Modifier.height(8.dp))
 
-                    listOf("games" to "Games", "dlc" to "DLC", "applications" to "Applications", "tools" to "Tools").forEach { (key, label) ->
-                        FilterToggleRow(label, contentFilters[key] ?: false) { contentFilters[key] = it }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterButton("Games", contentFilters["games"] == true, Modifier.weight(1f)) { contentFilters["games"] = it }
+                        FilterButton("DLC", contentFilters["dlc"] == true, Modifier.weight(1f)) { contentFilters["dlc"] = it }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterButton("Applications", contentFilters["applications"] == true, Modifier.weight(1f)) { contentFilters["applications"] = it }
+                        FilterButton("Tools", contentFilters["tools"] == true, Modifier.weight(1f)) { contentFilters["tools"] = it }
                     }
                 }
             }
@@ -1106,28 +1121,21 @@ class UnifiedActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun FilterToggleRow(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
+    private fun FilterButton(label: String, checked: Boolean, modifier: Modifier = Modifier, onToggle: (Boolean) -> Unit) {
+        val bgColor = if (checked) Accent.copy(alpha = 0.2f) else CardDark
+        val borderColor = if (checked) Accent else Color.Transparent
+        val textColor = if (checked) Accent else TextSecondary
+
+        Box(
+            modifier = modifier
                 .clip(RoundedCornerShape(8.dp))
+                .background(bgColor)
+                .border(1.dp, borderColor, RoundedCornerShape(8.dp))
                 .clickable { onToggle(!checked) }
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(vertical = 10.dp, horizontal = 12.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-            Switch(
-                checked = checked,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Accent,
-                    checkedTrackColor = Accent.copy(alpha = 0.3f),
-                    uncheckedThumbColor = TextSecondary,
-                    uncheckedTrackColor = TextSecondary.copy(alpha = 0.15f)
-                ),
-                modifier = Modifier.height(24.dp)
-            )
+            Text(label, style = MaterialTheme.typography.labelMedium, color = textColor, fontWeight = FontWeight.Bold)
         }
     }
 }
