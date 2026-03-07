@@ -46,8 +46,7 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.GravityCompat;
 import com.winlator.cmod.steam.utils.SteamUtils;
-import com.winlator.cmod.steam.service.SteamService;
-import com.winlator.cmod.steam.SteamClientManager;
+
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.preference.PreferenceManager;
 
@@ -498,7 +497,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             if ("STEAM".equals(gameSource)) {
                 String appIdStr = shortcut.getExtra("app_id");
                 if (!appIdStr.isEmpty()) {
-                    String gameInstallPath = SteamService.getAppDirPath(Integer.parseInt(appIdStr));
+                    String gameInstallPath = SteamBridge.getAppDirPath(Integer.parseInt(appIdStr));
                     if (new File(gameInstallPath).exists()) {
                         mountADriveOnContainer(container, gameInstallPath);
                         Log.d("XServerDisplayActivity", "Mounted A: drive to " + gameInstallPath + " on container " + container.id);
@@ -1065,7 +1064,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         // Extract Steam client files if Steam mode is enabled on the container
         if (container.isLaunchRealSteam()) {
             Log.d("XServerDisplayActivity", "Steam mode enabled, extracting Steam client files...");
-            SteamClientManager.extractSteam(this);
+            SteamBridge.extractSteam(this);
         }
 
         String desktopTheme = shortcut != null ? shortcut.getExtra("desktopTheme", container.getDesktopTheme()) : container.getDesktopTheme();

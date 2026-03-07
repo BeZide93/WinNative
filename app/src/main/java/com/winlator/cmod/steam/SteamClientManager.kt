@@ -1,0 +1,197 @@
+package com.winlator.cmod.steam
+
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.widget.Toast
+import com.winlator.cmod.core.FileUtils
+import com.winlator.cmod.core.TarCompressorUtils
+import com.winlator.cmod.xenvironment.ImageFs
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import kotlin.concurrent.thread
+
+/**
+ * Manages Steam client download, extraction, and Steamless DRM patching.
+ */
+object SteamClientManager {
+    private const val TAG = "SteamClientManager"
+
+    private const val STEAM_DOWNLOAD_URL = "https://github.com/maxjivi05/Components/releases/download/Components/steam.tzst"
+    private const val STEAM_PRIMARY_CDN = "https://downloads.gamenative.app/steam.tzst"
+    private const val STEAM_FALLBACK_CDN = "https://pub-9fcd5294bd0d4b85a9d73615bf98f3b5.r2.dev/steam.tzst"
+
+    interface DownloadProgressListener {
+        fun onProgress(progress: Float)
+        fun onComplete(success: Boolean, error: String?)
+    }
+
+    interface ShellCommandRunner {
+        fun exec(command: String): String
+    }
+
+    @JvmStatic
+    fun isSteamDownloaded(context: Context): Boolean {
+        val steamFile = File(context.filesDir, "steam.tzst")
+        return steamFile.exists() && steamFile.length() > 0
+    }
+
+    @JvmStatic
+    fun isSteamInstalled(context: Context): Boolean {
+        val imageFs = ImageFs.find(context)
+        val steamExe = File(imageFs.rootDir, "${ImageFs.WINEPREFIX}/drive_c/Program Files (x86)/Steam/steam.exe")
+        return steamExe.exists()
+    }
+
+    @JvmStatic
+    fun downloadSteam(context: Context, listener: DownloadProgressListener?) {
+        thread(name = "SteamDownloader") {
+            val dest = File(context.filesDir, "steam.tzst")
+            val tmp = File("${dest.absolutePath}.part")
+            var success = false
+            var error: String? = null
+
+            val urls = arrayOf(STEAM_DOWNLOAD_URL, STEAM_PRIMARY_CDN, STEAM_FALLBACK_CDN)
+            for (urlStr in urls) {
+                try {
+                    Log.d(TAG, "Attempting download from: $urlStr")
+                    downloadFile(urlStr, tmp, listener)
+
+                    if (tmp.exists() && tmp.length() > 0) {
+                        if (!tmp.renameTo(dest)) {
+                            Files.copy(tmp.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                            tmp.delete()
+                        }
+                        success = true
+                        Log.d(TAG, "Steam download completed: ${dest.length()} bytes")
+                        break
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Download failed from $urlStr: ${e.message}")
+                    error = e.message
+                    tmp.delete()
+                }
+            }
+
+            if (!success) {
+                val finalError = error ?: "All download sources failed"
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Steam download failed: $finalError. Try disabling VPN.", Toast.LENGTH_LONG).show()
+                }
+            }
+
+            listener?.let { l ->
+                Handler(Looper.getMainLooper()).post {
+                    l.onComplete(success, error)
+                }
+            }
+        }
+    }
+
+    private fun downloadFile(urlStr: String, dest: File, listener: DownloadProgressListener?) {
+        var conn: HttpURLConnection? = null
+        try {
+            conn = URL(urlStr).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            conn.instanceFollowRedirects = true
+
+            val responseCode = conn.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                throw Exception("HTTP $responseCode")
+            }
+
+            val total = conn.contentLength.toLong()
+            var downloaded = 0L
+
+            conn.inputStream.use { input ->
+                FileOutputStream(dest).use { output ->
+                    val buf = ByteArray(8192)
+                    var bytesRead: Int
+                    while (input.read(buf).also { bytesRead = it } >= 0) {
+                        output.write(buf, 0, bytesRead)
+                        downloaded += bytesRead
+                        if (listener != null && total > 0) {
+                            val progress = downloaded.toFloat() / total
+                            Handler(Looper.getMainLooper()).post { listener.onProgress(progress) }
+                        }
+                    }
+                }
+            }
+
+            if (total > 0 && dest.length() != total) {
+                dest.delete()
+                throw Exception("Incomplete download: ${dest.length()}/$total")
+            }
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    @JvmStatic
+    fun extractSteam(context: Context): Boolean {
+        if (isSteamInstalled(context)) return true
+
+        val steamFile = File(context.filesDir, "steam.tzst")
+        if (!steamFile.exists()) return false
+
+        val imageFs = ImageFs.find(context)
+        return try {
+            TarCompressorUtils.extract(
+                TarCompressorUtils.Type.ZSTD,
+                steamFile,
+                imageFs.rootDir,
+                null
+            )
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract steam.tzst: ${e.message}")
+            false
+        }
+    }
+
+    @JvmStatic
+    fun runSteamless(context: Context, exePath: String, shellRunner: ShellCommandRunner): Boolean {
+        val rootDir = ImageFs.find(context).rootDir
+        val steamlessCli = File(rootDir, "Steamless/Steamless.CLI.exe")
+        if (!steamlessCli.exists()) return false
+
+        var batchFile: File? = null
+        try {
+            val normalizedPath = exePath.replace('/', '\\')
+            val windowsPath = "A:\\$normalizedPath"
+
+            batchFile = File(rootDir, "tmp/steamless_wrapper.bat")
+            batchFile.parentFile?.mkdirs()
+            FileUtils.writeString(batchFile, "@echo off\r\nz:\\Steamless\\Steamless.CLI.exe \"$windowsPath\"\r\n")
+
+            val command = "wine z:\\tmp\\steamless_wrapper.bat"
+            Log.d(TAG, "Steamless output: ${shellRunner.exec(command)}")
+
+            val unixPath = exePath.replace('\\', '/')
+            val wineprefix = File(rootDir, ImageFs.WINEPREFIX)
+            val exe = File(wineprefix, "dosdevices/a:/$unixPath")
+            val unpackedExe = File(wineprefix, "dosdevices/a:/$unixPath.unpacked.exe")
+            val originalExe = File(wineprefix, "dosdevices/a:/$unixPath.original.exe")
+
+            if (exe.exists() && unpackedExe.exists()) {
+                if (!originalExe.exists()) {
+                    Files.copy(exe.toPath(), originalExe.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+                Files.copy(unpackedExe.toPath(), exe.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                return true
+            }
+            return false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error running Steamless", e)
+            return false
+        } finally {
+            batchFile?.delete()
+        }
+    }
+}
