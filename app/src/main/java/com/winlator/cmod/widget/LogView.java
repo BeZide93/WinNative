@@ -205,7 +205,7 @@ public class LogView extends View {
         if (!logsDir.exists())
             logsDir.mkdirs();
 
-        String logFile = fileName.replaceAll("\\s", "_").toLowerCase() + "_" + DateFormat.format("yyyy-MM-dd_HH-mm-ss", new Date()) + ".txt";
+        String logFile = fileName.replaceAll("[^a-zA-Z0-9\\-_]", "_").toLowerCase() + "_" + DateFormat.format("yyyy-MM-dd_HH-mm-ss", new Date()) + ".txt";
         return new File(logsDir, logFile);
     }
     

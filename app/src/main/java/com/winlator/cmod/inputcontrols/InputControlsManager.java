@@ -48,7 +48,12 @@ public class InputControlsManager {
     }
 
     public ArrayList<ControlsProfile> getProfiles(boolean ignoreTemplates) {
-        if (!profilesLoaded) loadProfiles(ignoreTemplates);
+        if (!profilesLoaded) loadProfiles(false);
+        if (ignoreTemplates) {
+            ArrayList<ControlsProfile> filteredProfiles = new ArrayList<>();
+            for (ControlsProfile profile : profiles) if (!profile.isTemplate()) filteredProfiles.add(profile);
+            return filteredProfiles;
+        }
         return profiles;
     }
 

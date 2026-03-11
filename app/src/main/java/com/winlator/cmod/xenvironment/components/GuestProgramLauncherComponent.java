@@ -58,6 +58,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private final ContentProfile wineProfile;
     private Container container;
     private final Shortcut shortcut;
+    private File workingDir;
+
+    public void setWorkingDir(File workingDir) {
+        this.workingDir = workingDir;
+    }
 
     public void setWineInfo(WineInfo wineInfo) {
         this.wineInfo = wineInfo;
@@ -83,8 +88,9 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         Log.d("GuestProgramLauncherComponent", "box64Version: " + box64Version);
 
         File rootDir = imageFs.getRootDir();
+        boolean box64Missing = !new File(rootDir, "/usr/bin/box64").exists();
 
-        if (!box64Version.equals(container.getExtra("box64Version"))) {
+        if (box64Missing || !box64Version.equals(container.getExtra("box64Version"))) {
             ContentProfile profile = contentsManager.getProfileByEntryName("box64-" + box64Version);
             if (profile != null)
                 contentsManager.applyContent(profile);
@@ -101,7 +107,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
     }
 
-    private void extractEmulatorsDlls() {;
+    private void extractEmulatorsDlls() {
         Context context = environment.getContext();
         File rootDir = environment.getImageFs().getRootDir();
         File system32dir = new File(rootDir + "/home/xuser/.wine/drive_c/windows/system32");
@@ -122,7 +128,18 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         Log.d("GuestProgramLauncherComponent", "box64Version in use: " + wowbox64Version);
         Log.d("GuestProgramLauncherComponent", "fexcoreVersion in use: " + fexcoreVersion);
 
-        if (!wowbox64Version.equals(container.getExtra("box64Version"))) {
+        // Check if critical FEXCore DLLs actually exist on disk (they may be missing even if version matches)
+        boolean fexcoreDllsMissing = !new File(system32dir, "libwow64fex.dll").exists() || !new File(system32dir, "libarm64ecfex.dll").exists();
+        boolean wowbox64DllMissing = !new File(system32dir, "wowbox64.dll").exists();
+
+        if (fexcoreDllsMissing) {
+            Log.w("GuestProgramLauncherComponent", "FEXCore DLLs missing from system32 (libwow64fex.dll or libarm64ecfex.dll), forcing re-extraction");
+        }
+        if (wowbox64DllMissing) {
+            Log.w("GuestProgramLauncherComponent", "wowbox64.dll missing from system32, forcing re-extraction");
+        }
+
+        if (wowbox64DllMissing || !wowbox64Version.equals(container.getExtra("box64Version"))) {
             ContentProfile profile = contentsManager.getProfileByEntryName("wowbox64-" + wowbox64Version);
             if (profile != null)
                 contentsManager.applyContent(profile);
@@ -132,7 +149,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             containerDataChanged = true;
         }
 
-        if (!fexcoreVersion.equals(container.getExtra("fexcoreVersion"))) {
+        if (fexcoreDllsMissing || !fexcoreVersion.equals(container.getExtra("fexcoreVersion"))) {
             ContentProfile profile = contentsManager.getProfileByEntryName("fexcore-" + fexcoreVersion);
             if (profile != null)
                 contentsManager.applyContent(profile);
@@ -301,7 +318,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         // Setting up essential environment variables for Wine
         envVars.put("HOME", imageFs.home_path);
         envVars.put("USER", ImageFs.USER);
-        envVars.put("TMPDIR", wineInfo.isArm64EC() ? imageFs.getRootDir().getPath() + "/tmp" : rootDir.getPath() + "/usr/tmp");
+        envVars.put("TMPDIR", rootDir.getPath() + "/usr/tmp");
         envVars.put("XDG_DATA_DIRS", rootDir.getPath() + "/usr/share");
         envVars.put("LD_LIBRARY_PATH", rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64" + (wineInfo.isArm64EC() ? ":" + context.getApplicationInfo().nativeLibraryDir : ""));
         envVars.put("XDG_CONFIG_DIRS", rootDir.getPath() + "/usr/etc/xdg");
@@ -314,6 +331,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         envVars.put("PREFIX", rootDir.getPath() + "/usr");
         envVars.put("DISPLAY", ":0");
         envVars.put("WINE_DISABLE_FULLSCREEN_HACK", "1");
+        envVars.put("ENABLE_UTIL_LAYER", "1");
         envVars.put("GST_PLUGIN_FEATURE_RANK", "ximagesink:3000");
         envVars.put("ALSA_CONFIG_PATH", rootDir.getPath() + "/usr/share/alsa/alsa.conf" + ":" + rootDir.getPath() + "/usr/etc/alsa/conf.d/android_aserver.conf");
         envVars.put("ALSA_PLUGIN_DIR", rootDir.getPath() + "/usr/lib/alsa-lib");
@@ -410,12 +428,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             Log.w("GuestProgramLauncher", "libevshim.so not found anywhere!");
         }
 
+        // Winlator legacy hooks (libhook_impl.so, libfile_redirect_hook.so) break FEXCore rendering and stability.
+        // Removed them for Arm64EC mode to match Bionic/Ludashi implementation.
         if (wineInfo.isArm64EC()) {
-            File hookImpl = new File(context.getApplicationInfo().nativeLibraryDir, "libhook_impl.so");
-            File fileRedirect = new File(context.getApplicationInfo().nativeLibraryDir, "libfile_redirect_hook.so");
-            if (hookImpl.exists() && fileRedirect.exists()) {
-                ld_preload += (ld_preload.isEmpty() ? "" : ":") + hookImpl.getAbsolutePath() + ":" + fileRedirect.getAbsolutePath();
-            }
+            // Do not preload libhook_impl.so or libfile_redirect_hook.so on Arm64EC.
         }
 
         envVars.put("LD_PRELOAD", ld_preload);
@@ -458,21 +474,33 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         Log.d("GuestProgramLauncherComponent", "Emulator (32-bit): " + emulator);
         Log.d("GuestProgramLauncherComponent", "Emulator (64-bit): " + emulator64);
 
+        boolean is64Bit = true;
+
+        // Find the actual .exe file to check architecture
+        File exeFile = null;
+        String winPath = null;
+        if (guestExecutable.contains("\"")) {
+            int start = guestExecutable.indexOf("\"") + 1;
+            int end = guestExecutable.indexOf("\"", start);
+            if (start > 0 && end > start) winPath = guestExecutable.substring(start, end);
+        } else {
+            // If not quoted, take the first part before any space
+            int spaceIndex = guestExecutable.indexOf(" ");
+            winPath = spaceIndex != -1 ? guestExecutable.substring(0, spaceIndex) : guestExecutable;
+        }
+
+        if (winPath != null && winPath.toLowerCase().endsWith(".exe")) {
+            exeFile = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, winPath);
+            if (exeFile != null) Log.d("GuestProgramLauncherComponent", "Detected executable for arch check: " + exeFile.getAbsolutePath());
+        }
+
         // Determine which emulator to use for HODLL based on guest executable architecture
         String selectedEmulator = emulator;
         if (wineInfo.isArm64EC()) {
-            // Find the actual .exe file to check architecture
-            File exeFile = null;
-            if (guestExecutable.contains("\"")) {
-                int start = guestExecutable.indexOf("\"") + 1;
-                int end = guestExecutable.indexOf("\"", start);
-                if (start > 0 && end > start) {
-                    String winPath = guestExecutable.substring(start, end);
-                    exeFile = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, winPath);
-                }
-            }
+            is64Bit = (exeFile != null && com.winlator.cmod.core.PEHelper.is64Bit(exeFile)) || 
+                             (guestExecutable != null && guestExecutable.contains("steamclient_loader_x64.exe"));
             
-            if (exeFile != null && com.winlator.cmod.core.PEHelper.is64Bit(exeFile)) {
+            if (is64Bit) {
                 selectedEmulator = emulator64;
             }
         }
@@ -480,26 +508,22 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         // Construct the command without Box64 to the Wine executable
         String command = "";
         String overriddenCommand = envVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
-        if (!overriddenCommand.isEmpty()) {
+        if (overriddenCommand != null && !overriddenCommand.isEmpty()) {
             String[] parts = overriddenCommand.split(";");
             for (String part : parts)
                 command += part + " ";
             command = command.trim();
         }
-        else {
-            if (wineInfo.isArm64EC()) {
-                // HODLL is only for Arm64EC Wine with WoW64 translation DLLs
-                if (selectedEmulator.toLowerCase().equals("fexcore"))
-                    envVars.put("HODLL", "libwow64fex.dll");
-                else
-                    envVars.put("HODLL", "wowbox64.dll");
+        if (wineInfo.isArm64EC()) {
+            // HODLL is mandatory for Arm64EC Wine to translate x86/x64 guest code.
+            // We set both libwow64fex.dll (32-bit) and libarm64ecfex.dll (64-bit)
+            // to support mixed architecture process trees (e.g. 32-bit launcher -> 64-bit game).
+            envVars.put("HODLL", "libwow64fex.dll:libarm64ecfex.dll");
 
-                command = winePath + "/" + guestExecutable;
-            }
-            else {
-                // x86_64 containers use Box64 binary translation directly, no HODLL
-                command = imageFs.getBinDir() + "/box64 " + guestExecutable;
-            }
+            command = winePath + "/" + guestExecutable;
+        } else {
+            // x86_64 containers use Box64 binary translation directly
+            command = imageFs.getBinDir() + "/box64 " + guestExecutable;
         }
 
         // **Maybe remove this: Set execute permissions for box64 if necessary (Glibc/Proot artifact)
@@ -510,9 +534,9 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         Log.d("GuestProgramLauncherComponent", "=== FINAL LAUNCH COMMAND ===");
         Log.d("GuestProgramLauncherComponent", "Command: " + command);
-        Log.d("GuestProgramLauncherComponent", "Working dir: " + rootDir.getAbsolutePath());
+        Log.d("GuestProgramLauncherComponent", "Working dir: " + (workingDir != null ? workingDir.getAbsolutePath() : rootDir.getAbsolutePath()));
 
-        return ProcessHelper.exec(command, envVars.toStringArray(), rootDir, (status) -> {
+        return ProcessHelper.exec(command, envVars.toStringArray(), workingDir != null ? workingDir : rootDir, (status) -> {
             synchronized (lock) {
                 pid = -1;
             }

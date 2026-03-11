@@ -1901,77 +1901,125 @@ class UnifiedActivity : ComponentActivity() {
             return
         }
 
+        // Try to find an existing shortcut first (preserves per-game settings)
+        var existingShortcut = containerManager.loadShortcuts().find {
+            it.getExtra("game_source") == "EPIC" && it.getExtra("app_id") == app.id.toString()
+        }
+
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             val launchArgsResult = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 EpicGameLauncher.buildLaunchParameters(context, app)
             }
             val args = launchArgsResult.getOrNull()?.joinToString(" ") ?: ""
 
-            var exePath = withContext(kotlinx.coroutines.Dispatchers.IO) { EpicService.getInstalledExe(app.id) }
-            val execCmd = if (exePath.isNotEmpty()) {
-                "wine \"A:\\\\${exePath.replace("/", "\\\\")}\""
+            if (existingShortcut != null) {
+                // Existing shortcut found: preserve per-game settings, just update install path and mount A: drive
+                val shortcut = existingShortcut!!
+                // Ensure game_install_path is always up-to-date
+                shortcut.putExtra("game_install_path", gameInstallPath)
+
+                // Repair broken Exec line if exe path is missing (just "A:\")
+                val currentPath = shortcut.path
+                if (currentPath == null || currentPath == "A:\\" || currentPath == "A:\\\\") {
+                    var exePath = withContext(kotlinx.coroutines.Dispatchers.IO) { EpicService.getInstalledExe(app.id) }
+                    val newExecCmd = if (exePath.isNotEmpty()) {
+                        "wine \"A:\\\\${exePath.replace("/", "\\\\")}\""
+                    } else {
+                        val exeFile = findGameExe(gameDir)
+                        if (exeFile != null) {
+                            val dosPath = exeFile.relativeTo(gameDir).path.replace("/", "\\\\")
+                            "wine \"A:\\\\${dosPath}\""
+                        } else null
+                    }
+                    if (newExecCmd != null) {
+                        // Rewrite the Exec line in the .desktop file while preserving all other content
+                        val lines = com.winlator.cmod.core.FileUtils.readLines(shortcut.file)
+                        val sb = StringBuilder()
+                        for (line in lines) {
+                            if (line.startsWith("Exec=")) {
+                                sb.append("Exec=$newExecCmd\n")
+                            } else {
+                                sb.append(line).append("\n")
+                            }
+                        }
+                        com.winlator.cmod.core.FileUtils.writeString(shortcut.file, sb.toString())
+                    }
+                }
+
+                shortcut.saveData()
+
+                mountADrive(shortcut.container, gameInstallPath)
+
+                val intent = Intent(context, XServerDisplayActivity::class.java)
+                intent.putExtra("container_id", shortcut.container.id)
+                intent.putExtra("shortcut_path", shortcut.file.path)
+                intent.putExtra("shortcut_name", shortcut.name)
+                intent.putExtra("extra_exec_args", args) // Pass fresh tokens
+                context.startActivity(intent)
             } else {
-                val exeFile = findGameExe(gameDir)
-                if (exeFile != null) {
-                    val dosPath = exeFile.relativeTo(gameDir).path.replace("/", "\\\\")
-                    "wine \"A:\\\\${dosPath}\""
+                // No existing shortcut — create a new one
+                var exePath = withContext(kotlinx.coroutines.Dispatchers.IO) { EpicService.getInstalledExe(app.id) }
+                val execCmd = if (exePath.isNotEmpty()) {
+                    "wine \"A:\\\\${exePath.replace("/", "\\\\")}\""
                 } else {
-                    "wine \"A:\\\\\""
+                    val exeFile = findGameExe(gameDir)
+                    if (exeFile != null) {
+                        val dosPath = exeFile.relativeTo(gameDir).path.replace("/", "\\\\")
+                        "wine \"A:\\\\${dosPath}\""
+                    } else {
+                        "wine \"A:\\\\\""
+                    }
                 }
-            }
 
-            var containers = containerManager.getContainers()
-            var container = containerManager.loadShortcuts().find {
-                it.getExtra("game_source") == "EPIC" && it.getExtra("app_id") == app.id.toString()
-            }?.container
+                var containers = containerManager.getContainers()
+                var container = containers.firstOrNull()
 
-            if (container == null) container = containers.firstOrNull()
-            
-            if (container == null) {
-                try {
-                    val data = org.json.JSONObject()
-                    data.put("name", "Default")
-                    data.put("wineVersion", com.winlator.cmod.core.WineInfo.MAIN_WINE_VERSION.identifier())
-                    val contentsManager = com.winlator.cmod.contents.ContentsManager(context)
-                    contentsManager.syncContents()
-                    container = containerManager.createContainer(data, contentsManager)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                if (container == null) {
+                    try {
+                        val data = org.json.JSONObject()
+                        data.put("name", "Default")
+                        data.put("wineVersion", com.winlator.cmod.core.WineInfo.MAIN_WINE_VERSION.identifier())
+                        val contentsManager = com.winlator.cmod.contents.ContentsManager(context)
+                        contentsManager.syncContents()
+                        container = containerManager.createContainer(data, contentsManager)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
+
+                if (container == null) {
+                    android.widget.Toast.makeText(context, "Failed to build container", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                mountADrive(container, gameInstallPath)
+
+                val desktopDir = container.getDesktopDir()
+                if (!desktopDir.exists()) desktopDir.mkdirs()
+                val shortcutFile = java.io.File(desktopDir, "${app.appName}.desktop")
+                val content = java.lang.StringBuilder()
+                content.append("[Desktop Entry]\n")
+                content.append("Type=Application\n")
+                content.append("Name=${app.title}\n")
+                content.append("Exec=$execCmd\n")
+                content.append("Icon=epic_icon_${app.id}\n")
+                content.append("\n[Extra Data]\n")
+                content.append("game_source=EPIC\n")
+                content.append("app_id=${app.id}\n")
+                content.append("container_id=${container.id}\n")
+                content.append("game_install_path=${gameInstallPath}\n")
+
+                com.winlator.cmod.core.FileUtils.writeString(shortcutFile, content.toString())
+
+                container.saveData()
+
+                val intent = Intent(context, XServerDisplayActivity::class.java)
+                intent.putExtra("container_id", container.id)
+                intent.putExtra("shortcut_path", shortcutFile.path)
+                intent.putExtra("shortcut_name", app.title)
+                intent.putExtra("extra_exec_args", args) // Pass fresh tokens
+                context.startActivity(intent)
             }
-
-            if (container == null) {
-                android.widget.Toast.makeText(context, "Failed to build container", android.widget.Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            mountADrive(container, gameInstallPath)
-
-            val desktopDir = container.getDesktopDir()
-            if (!desktopDir.exists()) desktopDir.mkdirs()
-            val shortcutFile = java.io.File(desktopDir, "${app.appName}.desktop")
-            val content = java.lang.StringBuilder()
-            content.append("[Desktop Entry]\n")
-            content.append("Type=Application\n")
-            content.append("Name=${app.title}\n")
-            content.append("Exec=$execCmd\n")
-            content.append("Icon=epic_icon_${app.id}\n")
-            content.append("\n[Extra Data]\n")
-            content.append("game_source=EPIC\n")
-            content.append("app_id=${app.id}\n")
-            content.append("container_id=${container.id}\n")
-            content.append("game_install_path=${gameInstallPath}\n")
-
-            com.winlator.cmod.core.FileUtils.writeString(shortcutFile, content.toString())
-
-            container.saveData()
-
-            val intent = Intent(context, XServerDisplayActivity::class.java)
-            intent.putExtra("container_id", container.id)
-            intent.putExtra("shortcut_path", shortcutFile.path)
-            intent.putExtra("shortcut_name", app.title)
-            intent.putExtra("extra_exec_args", args) // Pass fresh tokens
-            context.startActivity(intent)
         }
     }
 
@@ -2036,13 +2084,15 @@ class UnifiedActivity : ComponentActivity() {
     private fun findGameExe(dir: java.io.File): java.io.File? {
         // BFS: check each directory level fully before going deeper
         val exclusions = listOf("unins", "redist", "setup", "dotnet", "vcredist", 
-            "dxsetup", "helper", "crash", "ue4prereq", "dxwebsetup")
+            "dxsetup", "helper", "crash", "ue4prereq", "dxwebsetup", "launcher")
         
         var currentDirs = listOf(dir)
         var depth = 0
+        var fallbackExe: java.io.File? = null
         
-        while (currentDirs.isNotEmpty() && depth <= 3) {
+        while (currentDirs.isNotEmpty() && depth <= 4) {
             val nextDirs = mutableListOf<java.io.File>()
+            val candidates = mutableListOf<java.io.File>()
             
             for (d in currentDirs) {
                 val children = d.listFiles() ?: continue
@@ -2052,16 +2102,28 @@ class UnifiedActivity : ComponentActivity() {
                     } else if (f.extension.equals("exe", ignoreCase = true)) {
                         val name = f.name.lowercase()
                         if (exclusions.none { name.contains(it) }) {
-                            return f // Return first valid exe at this level
+                            candidates.add(f)
                         }
                     }
                 }
             }
             
+            // Prefer 64-bit executable candidates at the current depth
+            val exe64 = candidates.find { 
+                it.name.lowercase().contains("64") || 
+                it.parentFile?.name?.lowercase()?.contains("64") == true
+            }
+            if (exe64 != null) return exe64
+            
+            // Collect the first valid candidate as a fallback
+            if (fallbackExe == null && candidates.isNotEmpty()) {
+                fallbackExe = candidates.first()
+            }
+            
             currentDirs = nextDirs
             depth++
         }
-        return null
+        return fallbackExe
     }
 
 

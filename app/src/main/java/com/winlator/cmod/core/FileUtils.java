@@ -325,6 +325,13 @@ public abstract class FileUtils {
         if (path == null) return "";
         path = StringUtils.removeEndSlash(path);
         int index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        if (index == -1) {
+            // No separators found. If it's a drive letter like A:, return it, else ""
+            if (path.matches("^[a-zA-Z]:.*")) {
+                return path.substring(0, 2) + "\\";
+            }
+            return "";
+        }
         return path.substring(0, index);
     }
 

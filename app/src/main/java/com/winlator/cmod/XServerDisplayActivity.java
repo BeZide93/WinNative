@@ -157,6 +157,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private HashMap<String, String> graphicsDriverConfig;
     private String audioDriver = Container.DEFAULT_AUDIO_DRIVER;
     private String emulator = Container.DEFAULT_EMULATOR;
+    private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private String dxwrapper = Container.DEFAULT_DXWRAPPER;
     private KeyValueSet dxwrapperConfig;
     private String startupSelection;
@@ -447,7 +448,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         if (shortcut != null) {
             taskAffinityMask = (short) ProcessHelper.getAffinityMask(shortcut.getExtra("cpuList", container.getCPUList(true)));
-            taskAffinityMaskWoW64 = taskAffinityMask;
+            taskAffinityMaskWoW64 = (short) ProcessHelper.getAffinityMask(shortcut.getExtra("cpuListWoW64", container.getCPUListWoW64(true)));
         }
 
         // Determine the class name for the startup workarounds
@@ -456,7 +457,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         firstTimeBoot = container.getExtra("appVersion").isEmpty();
 
-        String wineVersion = container.getWineVersion();
+        wineVersion = container.getWineVersion();
         // Override wine version from per-game shortcut settings if available
         if (shortcut != null) {
             String shortcutWineVersion = shortcut.getExtra("wineVersion");
@@ -529,9 +530,35 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 }
             } else if ("EPIC".equals(gameSource)) {
                 String gameInstallPath = shortcut.getExtra("game_install_path");
+                // Fallback: resolve install path from Epic service if missing from shortcut
+                if (gameInstallPath.isEmpty()) {
+                    String appIdStr = shortcut.getExtra("app_id");
+                    if (!appIdStr.isEmpty()) {
+                        try {
+                            com.winlator.cmod.epic.data.EpicGame epicGame = com.winlator.cmod.epic.service.EpicService.Companion.getEpicGameOf(Integer.parseInt(appIdStr));
+                            if (epicGame != null) {
+                                String resolved = epicGame.getInstallPath();
+                                if (resolved == null || resolved.isEmpty()) {
+                                    resolved = com.winlator.cmod.epic.service.EpicConstants.INSTANCE.getGameInstallPath(this, epicGame.getAppName());
+                                }
+                                if (resolved != null && !resolved.isEmpty()) {
+                                    gameInstallPath = resolved;
+                                    // Persist so future launches don't need this fallback
+                                    shortcut.putExtra("game_install_path", gameInstallPath);
+                                    shortcut.saveData();
+                                    Log.d("XServerDisplayActivity", "Resolved missing Epic install path from service: " + gameInstallPath);
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.e("XServerDisplayActivity", "Failed to resolve Epic install path from app_id", e);
+                        }
+                    }
+                }
                 if (!gameInstallPath.isEmpty() && new File(gameInstallPath).exists()) {
                     mountADriveOnContainer(container, gameInstallPath);
                     Log.d("XServerDisplayActivity", "Mounted A: drive to " + gameInstallPath + " on container " + container.id);
+                } else {
+                    Log.e("XServerDisplayActivity", "EPIC install path missing or invalid: '" + gameInstallPath + "'");
                 }
             }
 
@@ -899,6 +926,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                     while (!ProcessHelper.listRunningWineProcesses().isEmpty()) {
                         long elapsed = System.currentTimeMillis() - start;
                         if (elapsed >= 1500) {
+                            for (String process : ProcessHelper.listRunningWineProcesses()) {
+                                try {
+                                    ProcessHelper.killProcess(Integer.parseInt(process));
+                                } catch (Exception e) {
+                                    Log.e("XServerDisplayActivity", "Failed to kill process: " + process, e);
+                                }
+                            }
                             break;
                         }
                     }
@@ -1251,7 +1285,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         guestProgramLauncherComponent = new GuestProgramLauncherComponent(
                 contentsManager,
-                contentsManager.getProfileByEntryName(container.getWineVersion()),
+                contentsManager.getProfileByEntryName(wineVersion),
                 shortcut
         );
 
@@ -1263,7 +1297,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             guestProgramLauncherComponent.setContainer(this.container);
             guestProgramLauncherComponent.setWineInfo(this.wineInfo);
 
-            String wineStartCmd = getWineStartCommand();
+            String wineStartCmd = getWineStartCommand(guestProgramLauncherComponent);
             String guestExecutable;
             
             // Use wine explorer for all containers - GuestProgramLauncherComponent handles
@@ -1292,7 +1326,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             }
 
             ArrayList<String> bindingPaths = new ArrayList<>();
-            for (String[] drive : container.drivesIterator()) {
+            String drives = shortcut != null ? shortcut.getExtra("drives", container.getDrives()) : container.getDrives();
+            for (String[] drive : Container.drivesIterator(drives)) {
                 bindingPaths.add(drive[1]);
             }
 
@@ -1730,7 +1765,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs" + ".tzst", rootDir);
         }
 
-        if (adrenoToolsDriverId != "System") {
+        if (adrenoToolsDriverId != null && !adrenoToolsDriverId.equals("System")) {
             AdrenotoolsManager adrenotoolsManager = new AdrenotoolsManager(this);
             adrenotoolsManager.setDriverById(envVars, imageFs, adrenoToolsDriverId);
         }
@@ -1919,7 +1954,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             Log.d(TAG, "Extracting nglide wrapper");
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/nglide.tzst", windowsDir, onExtractFileListener);
 
-            if (ddrawrapper.contains("None")) {
+            if (ddrawrapper.equalsIgnoreCase("none") || ddrawrapper.contains("None")) {
                 Log.d(TAG, "No DDRaw wrapper has been selected, restoring original ddraw files");
                 restoreOriginalDllFiles(new String[]{ "ddraw.dll", "d3dimm.dll" });
             }
@@ -2061,7 +2096,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         c.saveData();
     }
 
-    private String getWineStartCommand() {
+    private String getWineStartCommand(GuestProgramLauncherComponent launcherComponent) {
         // Initialize overrideEnvVars if not already done
         EnvVars envVars = getOverrideEnvVars();
 
@@ -2069,155 +2104,128 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         String args = "";
 
         if (shortcut != null) {
-            String gameSource = shortcut.getExtra("game_source");
-            Log.d("XServerDisplayActivity", "getWineStartCommand: gameSource=" + gameSource + " shortcut.path=" + shortcut.path);
-            if (gameSource.equals("CUSTOM")) {
-                // Custom game: launch exe directly via A: drive, bypass all Steam/Goldberg
-                String customExe = shortcut.getExtra("custom_exe");
-                String customFolder = shortcut.getExtra("custom_game_folder");
-                if (!customExe.isEmpty() && !customFolder.isEmpty()) {
-                    try {
-                        // Build the A: drive relative path
-                        String relPath = new File(customExe).toPath()
-                                .toAbsolutePath().toString()
-                                .substring(new File(customFolder).toPath()
-                                        .toAbsolutePath().toString().length());
-                        String dosPath = "A:" + relPath.replace("/", "\\\\");
-                        args = "\"" + dosPath + "\"";
-                        Log.d("XServerDisplayActivity", "Custom game direct launch: " + args);
-                    } catch (Exception e) {
-                        // Fallback: use the exe filename on A: root
-                        String exeName = new File(customExe).getName();
-                        args = "\"A:\\\\" + exeName + "\"";
-                        Log.w("XServerDisplayActivity", "Custom game fallback launch: " + args);
-                    }
-                } else {
-                    // Last resort: try shortcut.path
-                    args = "\"" + shortcut.path.trim() + "\"";
-                    Log.w("XServerDisplayActivity", "Custom game using shortcut.path: " + args);
-                }
-            } else if (gameSource.equals("STEAM")) {
+            String path = shortcut.path;
+            String gameSource = shortcut.getExtra("game_source", "CUSTOM");
+            Log.d("XServerDisplayActivity", "getWineStartCommand: gameSource=" + gameSource + " shortcut.path=" + path);
+
+            // Normalize DOS paths like A:EOSBootstrapper.exe to A:\EOSBootstrapper.exe
+            if (path != null && path.matches("^[A-Z]:[^\\\\/].*")) {
+                path = path.substring(0, 2) + "\\" + path.substring(2);
+            }
+
+            if (gameSource.equals("STEAM")) {
                 int appId = Integer.parseInt(shortcut.getExtra("app_id"));
-                Log.d("XServerDisplayActivity", "getWineStartCommand: STEAM appId=" + appId);
-                
                 if (!container.isUseLegacyDRM()) {
-                    // ColdClientLoader mode (default, online play):
-                    // Launch via steamclient_loader_x64.exe which reads ColdClientLoader.ini
-                    // and injects the Goldberg steamclient DLLs for Steam auth
-                    File steamDir = new File(container.getRootDir(), ".wine/drive_c/Program Files (x86)/Steam");
-
-                    String loaderName = "steamclient_loader_x64.exe";
-                    String gameDirPath = SteamBridge.getAppDirPath(appId);
-                    Log.d("XServerDisplayActivity", "Steam game directory: " + gameDirPath);
-
-                    if (gameDirPath != null && !gameDirPath.isEmpty()) {
-                        File gameDir = new File(gameDirPath);
-                        File exeFile = findGameExe(gameDir);
-                        if (exeFile != null) {
-                            boolean is64Bit = com.winlator.cmod.core.PEHelper.is64Bit(exeFile);
-                            Log.d("XServerDisplayActivity", "Detected game exe: " + exeFile.getName() + " (64-bit: " + is64Bit + ")");
-
-                            // Only use 32-bit loader on ARM64 WoW64 where cross-architecture injection fails.
-                            // On x86_64 containers, steamclient_loader_x64.exe handles both 32/64-bit games correctly.
-                            if (!is64Bit && wineInfo != null && wineInfo.isArm64EC()) {
-                                File x32Loader = new File(steamDir, "steamclient_loader_x32.exe");
-                                if (x32Loader.exists()) {
-                                    loaderName = "steamclient_loader_x32.exe";
-                                }
-                            }
-                        } else {
-                            Log.w("XServerDisplayActivity", "Could not find game executable in " + gameDirPath);
-                        }
-                    }
-
-                    File loaderExe = new File(steamDir, loaderName);
-
-                    if (loaderExe.exists() || new File(steamDir, "steamclient_loader_x64.exe").exists()) {
-                        args = "\"C:\\\\Program Files (x86)\\\\Steam\\\\" + loaderName + "\"";
-                        Log.d("XServerDisplayActivity", "Steam game launch via ColdClientLoader: " + args);
-                    } else {                        // Fallback: launch directly if loader is missing
-                        Log.w("XServerDisplayActivity", "steamclient_loader_x64.exe not found, falling back to direct launch");
-                        String gameExeWinPath = findGameExeWinPath(appId, new File(SteamBridge.getAppDirPath(appId)));
-                        if (gameExeWinPath != null) {
-                            int lastBackslash = gameExeWinPath.lastIndexOf("\\");
-                            if (lastBackslash >= 0) {
-                                String dir = gameExeWinPath.substring(0, lastBackslash);
-                                String file = gameExeWinPath.substring(lastBackslash + 1);
-                                args = "/dir " + StringUtils.escapeDOSPath(dir) + " \"" + file + "\"";
-                            } else {
-                                args = "\"" + gameExeWinPath + "\"";
-                            }
-                        } else {
-                            args = "\"wfm.exe\"";
-                        }
-                    }
+                    args = "/dir \"C:\\Program Files (x86)\\Steam\" \"steamclient_loader_x64.exe\"";
+                    File nativeDir = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, "C:\\Program Files (x86)\\Steam");
+                    if (nativeDir != null && nativeDir.exists()) launcherComponent.setWorkingDir(nativeDir);
                 } else {
-                    // Legacy DRM mode: launch game directly
-                    // The replaced steam_api.dll stubs handle basic Steam API calls
                     String gameExeWinPath = findGameExeWinPath(appId, new File(SteamBridge.getAppDirPath(appId)));
-                    
                     if (gameExeWinPath != null) {
-                        Log.d("XServerDisplayActivity", "getWineStartCommand: gameExeWinPath=" + gameExeWinPath);
                         int lastBackslash = gameExeWinPath.lastIndexOf("\\");
                         if (lastBackslash >= 0) {
                             String dir = gameExeWinPath.substring(0, lastBackslash);
+                            if (dir.endsWith(":")) dir += "\\";
                             String file = gameExeWinPath.substring(lastBackslash + 1);
-                            args = "/dir " + StringUtils.escapeDOSPath(dir) + " \"" + file + "\"";
+                            
+                            File nativeDir = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, dir);
+                            if (nativeDir != null && nativeDir.exists()) {
+                                launcherComponent.setWorkingDir(nativeDir);
+                                Log.d("XServerDisplayActivity", "Set native working dir for Steam process: " + nativeDir.getPath());
+                            }
+                            
+                            if (wineInfo != null && wineInfo.isArm64EC()) {
+                                args = "\"" + gameExeWinPath + "\"";
+                            } else {
+                                args = "/dir " + StringUtils.escapeDOSPath(dir) + " \"" + file + "\"";
+                            }
                         } else {
                             args = "\"" + gameExeWinPath + "\"";
                         }
-                        Log.d("XServerDisplayActivity", "Legacy DRM Steam launch args: " + args);
                     } else {
                         args = "\"wfm.exe\"";
-                        Log.w("XServerDisplayActivity", "No exe found for Steam app " + appId + ", launching file manager");
                     }
                 }
             } else if (gameSource.equals("EPIC")) {
                 String extraArgs = getIntent().getStringExtra("extra_exec_args");
-                if (extraArgs != null && !extraArgs.isEmpty()) {
-                    // Prefer dynamic args (fresh tokens) from intent if available
-                    args = "\"" + shortcut.path + "\" " + extraArgs;
+                extraArgs = (extraArgs != null && !extraArgs.isEmpty()) ? " " + extraArgs : "";
+                
+                // Epic Games are always on A: drive. 
+                String filename = path;
+                String dir = "A:\\";
+                
+                if (path != null && path.contains("\\")) {
+                    int lastBackslash = path.lastIndexOf("\\");
+                    filename = path.substring(lastBackslash + 1);
+                    dir = path.substring(0, lastBackslash);
+                    if (dir.endsWith(":")) dir += "\\";
+                } else if (path != null && path.contains(":")) {
+                    filename = path.substring(path.indexOf(":") + 1);
+                    dir = path.substring(0, path.indexOf(":") + 1) + "\\";
+                }
+
+                File nativeDir = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, dir);
+                if (nativeDir != null && nativeDir.exists()) {
+                    launcherComponent.setWorkingDir(nativeDir);
+                    Log.d("XServerDisplayActivity", "Set native working dir for Epic process: " + nativeDir.getPath());
+                }
+
+                if (wineInfo != null && wineInfo.isArm64EC()) {
+                    String epicCommand = dir + (dir.endsWith("\\") ? "" : "\\") + filename;
+                    args = "\"" + epicCommand + "\"" + extraArgs;
                 } else {
-                    args = "\"" + shortcut.path + "\"";
+                    // Avoid StringUtils.escapeDOSPath here as it might double-escape
+                    args = "/dir \"" + dir + "\" \"" + filename + "\"" + extraArgs;
                 }
                 Log.d("XServerDisplayActivity", "Epic game launch: " + args);
             } else {
-                String execArgs = shortcut.getExtra("execArgs");
-                execArgs = !execArgs.isEmpty() ? " " + execArgs : "";
+                // Custom shortcut
+                String extraArgs = shortcut.getExtra("execArgs");
+                extraArgs = (extraArgs != null && !extraArgs.isEmpty()) ? " " + extraArgs : "";
 
-                // Check if shortcut.path is a Windows-style path (e.g., A:\dir\game.exe)
-                if (shortcut.path.matches("^[A-Z]:\\\\.*")) {
-                    // Windows-style path: pass directly as a quoted argument
-                    args += "\"" + shortcut.path + "\"" + execArgs;
-                } else if (shortcut.path.endsWith(".lnk")) {
-                    args += "\"" + shortcut.path + "\"" + execArgs;
-                } else {
-                    String exeDir = FileUtils.getDirname(shortcut.path);
-                    String filename = FileUtils.getName(shortcut.path);
+                if (path != null && (path.startsWith("explorer") || path.contains(" /desktop"))) {
+                    return path + extraArgs;
+                } else if (path != null) {
+                    int lastBackslash = path.lastIndexOf("\\");
+                    if (lastBackslash >= 0) {
+                        String dir = path.substring(0, lastBackslash);
+                        if (dir.endsWith(":")) dir += "\\";
+                        String file = path.substring(lastBackslash + 1);
 
-                    int dotIndex = filename.lastIndexOf(".");
-                    int spaceIndex = (dotIndex != -1) ? filename.indexOf(" ", dotIndex) : -1;
+                        File nativeDir = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, dir);
+                        if (nativeDir != null && nativeDir.exists()) {
+                            launcherComponent.setWorkingDir(nativeDir);
+                            Log.d("XServerDisplayActivity", "Set native working dir for Custom process: " + nativeDir.getPath());
+                        }
 
-                    if (spaceIndex != -1) {
-                        execArgs = filename.substring(spaceIndex + 1) + execArgs;
-                        filename = filename.substring(0, spaceIndex);
+                        if (wineInfo != null && wineInfo.isArm64EC()) {
+                            args = "\"" + path + "\"" + extraArgs;
+                        } else {
+                            args = "/dir \"" + dir + "\" \"" + file + "\"" + extraArgs;
+                        }
+                    } else {
+                        args = "\"" + path + "\"" + extraArgs;
                     }
-
-                    args += "/dir " + StringUtils.escapeDOSPath(exeDir) + " \"" + filename + "\"" + execArgs;
+                } else {
+                    args = "\"wfm.exe\"";
                 }
             }
         } else {
-            // Append EXTRA_EXEC_ARGS from overrideEnvVars if it exists
+            // No shortcut, check for override args or launch file manager
             if (envVars.has("EXTRA_EXEC_ARGS")) {
-                args += " " + envVars.get("EXTRA_EXEC_ARGS");
-                envVars.remove("EXTRA_EXEC_ARGS"); // Remove the key after use
+                args = envVars.get("EXTRA_EXEC_ARGS");
+                envVars.remove("EXTRA_EXEC_ARGS");
             } else {
-                args += "\"wfm.exe\"";
+                args = "\"wfm.exe\"";
             }
         }
-        String command = "winhandler.exe " + args;
-        Log.d("XServerDisplayActivity", "getWineStartCommand: FINAL command=" + command);
-        return command;
+
+        // Apply winhandler.exe wrapper ONLY IF we have arguments for it and it's not already a command
+        if (!args.isEmpty() && !args.startsWith("winhandler.exe") && !args.startsWith("explorer")) {
+            return "winhandler.exe " + args;
+        } else {
+            return args;
+        }
     }
 
     private String getExecutable() {
@@ -2342,7 +2350,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (shortcut != null && shortcut.path != null && !shortcut.path.isEmpty() 
                 && !shortcut.path.contains("steamclient_loader") 
                 && shortcut.path.contains("\\")) {
-            return shortcut.path;
+            
+            String safePath = shortcut.path;
+            if (safePath.matches("^[A-Z]:[^\\\\/].*")) {
+                safePath = safePath.substring(0, 2) + "\\" + safePath.substring(2);
+            }
+            return safePath;
         }
         
         // Auto-detect from game install directory
@@ -2793,11 +2806,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         java.util.LinkedList<File[]> queue = new java.util.LinkedList<>();
         queue.add(new File[]{dir});
         int depth = 0;
+        File fallbackExe = null;
         
-        while (!queue.isEmpty() && depth <= 3) {
+        String[] exclusions = {"unins", "redist", "setup", "dotnet", "vcredist", 
+                               "dxsetup", "helper", "crash", "ue4prereq", "dxwebsetup", "launcher"};
+        
+        while (!queue.isEmpty() && depth <= 4) {
             File[] currentDirs = queue.poll();
             java.util.List<File> nextDirs = new java.util.ArrayList<>();
-            File bestCandidate = null;
+            java.util.List<File> candidates = new java.util.ArrayList<>();
             
             for (File d : currentDirs) {
                 File[] children = d.listFiles();
@@ -2808,42 +2825,34 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                         nextDirs.add(f);
                     } else if (f.getName().toLowerCase().endsWith(".exe")) {
                         String name = f.getName().toLowerCase();
-                        
-                        // Skip non-game executables
-                        if (name.contains("unins") || name.contains("redist") 
-                                || name.contains("setup") || name.contains("dotnet")
-                                || name.contains("vcredist") || name.contains("dxsetup")
-                                || name.contains("helper") || name.contains("crash")
-                                || name.contains("ue4prereq") || name.contains("dxwebsetup")) {
-                            continue;
+                        boolean excluded = false;
+                        for (String exclusion : exclusions) {
+                            if (name.contains(exclusion)) {
+                                excluded = true;
+                                break;
+                            }
                         }
-                        
-                        // At root level (depth 0), strongly prefer any .exe found
-                        if (bestCandidate == null) {
-                            bestCandidate = f;
-                        }
+                        if (!excluded) candidates.add(f);
                     }
                 }
             }
-            
-            // If we found an exe at this level, return it (breadth-first preference)
-            if (bestCandidate != null) {
-                Log.d("XServerDisplayActivity", "findGameExe: found " + bestCandidate.getName() + " at depth " + depth);
-                return bestCandidate;
+
+            // Prefer 64-bit executable candidates at the current depth
+            for (File cand : candidates) {
+                if (cand.getName().toLowerCase().contains("64") || 
+                    (cand.getParentFile() != null && cand.getParentFile().getName().toLowerCase().contains("64"))) {
+                    return cand;
+                }
+            }
+
+            // Collect the first valid candidate as a fallback
+            if (fallbackExe == null && !candidates.isEmpty()) {
+                fallbackExe = candidates.get(0);
             }
             
-            // Queue next level
-            if (!nextDirs.isEmpty()) {
-                queue.add(nextDirs.toArray(new File[0]));
-            }
+            if (!nextDirs.isEmpty()) queue.add(nextDirs.toArray(new File[0]));
             depth++;
         }
-        
-        return null;
+        return fallbackExe;
     }
-
 }
-
-
-
-

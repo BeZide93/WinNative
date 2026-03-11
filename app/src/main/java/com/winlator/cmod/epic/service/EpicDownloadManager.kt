@@ -347,9 +347,10 @@ class EpicDownloadManager @Inject constructor(
                     isInstalled = true,
                     installPath = installPath,
                     installSize = totalInstalledSize,
+                    executable = manifest.meta?.launchExe ?: "",
                 )
                 epicManager.updateGame(updatedGame)
-                Timber.tag("Epic").i("Updated database: game marked as installed")
+                Timber.tag("Epic").i("Updated database: game marked as installed with executable: ${updatedGame.executable}")
             } catch (e: Exception) {
                 Timber.tag("Epic").e(e, "Failed to update database for game ${game.id}")
                 // Don't fail the entire download for DB issues

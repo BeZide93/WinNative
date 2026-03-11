@@ -101,8 +101,6 @@ public abstract class ProcessHelper {
             pidField.setAccessible(false);
             Log.d("ProcessHelper", "Process started with pid: " + pid);
 
-
-
             if (terminationCallback != null) createWaitForThread(process, terminationCallback);
 
         }
@@ -170,7 +168,7 @@ public abstract class ProcessHelper {
     public static String[] splitCommand(String command) {
         ArrayList<String> result = new ArrayList<>();
         boolean startedQuotes = false;
-        String value = "";
+        StringBuilder value = new StringBuilder();
         char currChar, nextChar;
         for (int i = 0, count = command.length(); i < count; i++) {
             currChar = command.charAt(i);
@@ -178,38 +176,32 @@ public abstract class ProcessHelper {
             if (startedQuotes) {
                 if (currChar == '"') {
                     startedQuotes = false;
-                    if (!value.isEmpty()) {
-                        value += '"';
-                        result.add(value);
-                        value = "";
-                    }
                 }
-                else value += currChar;
+                else value.append(currChar);
             }
             else if (currChar == '"') {
                 startedQuotes = true;
-                value += '"';
             }
             else {
                 nextChar = i < count-1 ? command.charAt(i+1) : '\0';
                 if (currChar == ' ' || (currChar == '\\' && nextChar == ' ')) {
                     if (currChar == '\\') {
-                        value += ' ';
+                        value.append(' ');
                         i++;
                     }
-                    else if (!value.isEmpty()) {
-                        result.add(value);
-                        value = "";
+                    else if (value.length() > 0) {
+                        result.add(value.toString());
+                        value.setLength(0);
                     }
                 }
                 else {
-                    value += currChar;
-                    if (i == count-1) {
-                        result.add(value);
-                        value = "";
-                    }
+                    value.append(currChar);
                 }
             }
+        }
+        
+        if (value.length() > 0) {
+            result.add(value.toString());
         }
 
         return result.toArray(new String[0]);

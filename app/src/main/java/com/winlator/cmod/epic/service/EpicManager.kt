@@ -374,27 +374,41 @@ class EpicManager @Inject constructor(
             return ""
         }
 
-        // For now, return the install path - actual executable detection would require
-        // parsing the game's launch manifest or config files
-        // Most Epic games have a .exe in the root or Binaries folder
         val installDir = File(game.installPath)
         if (!installDir.exists()) {
             Timber.tag("Epic").e("Install directory does not exist: ${game.installPath}")
             return ""
         }
 
-        // Try to find the main executable
+        // 1. Prioritize manifest's launch executable if stored in database
+        if (game.executable.isNotEmpty()) {
+            val storedExeFile = File(installDir, game.executable)
+            if (storedExeFile.exists()) {
+                Timber.tag("Epic").i("Found stored executable from manifest: ${storedExeFile.absolutePath}")
+                return game.executable
+            } else {
+                Timber.tag("Epic").w("Stored executable not found on disk: ${game.executable}, falling back to heuristic")
+            }
+        }
+
+        // 2. Fallback heuristic for finding the main executable
         // Common patterns: Game.exe, GameName.exe, or in Binaries/Win64/
         val exeFiles = installDir.walk()
             .filter { it.extension.equals("exe", ignoreCase = true) }
             .filter { !it.name.contains("UnityCrashHandler", ignoreCase = true) }
             .filter { !it.name.contains("UnrealCEFSubProcess", ignoreCase = true) }
-            .sortedBy { it.absolutePath.length } // Prefer shorter paths (usually main exe)
+            .filter { !it.name.contains("launcher", ignoreCase = true) }
             .toList()
 
-        val mainExe = exeFiles.firstOrNull()
+        // Prioritize 64-bit executables (Win64, x64, or filename containing 64)
+        val mainExe = exeFiles.find { 
+            it.absolutePath.lowercase().contains("win64") || 
+            it.absolutePath.lowercase().contains("x64") ||
+            it.name.lowercase().contains("64")
+        } ?: exeFiles.sortedBy { it.absolutePath.length }.firstOrNull()
+
         if (mainExe != null) {
-            Timber.tag("Epic").i("Found executable: ${mainExe.absolutePath}")
+            Timber.tag("Epic").i("Found executable via heuristic: ${mainExe.absolutePath}")
             return mainExe.relativeTo(installDir).path
         }
 

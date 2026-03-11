@@ -25,7 +25,7 @@ public class StringUtils {
     }
 
     public static String unescape(String path) {
-        return path.replaceAll("\\\\([^\\\\]+)", "$1").replaceAll("\\\\([^\\\\]+)", "$1").replaceAll("\\\\\\\\", "\\\\").trim();
+        return path.replace("\\\\", "\\").trim();
     }
 
     public static String parseIdentifier(Object text) {

@@ -463,20 +463,25 @@ public class ContentsManager {
     }
 
     public ContentProfile getProfileByEntryName(String entryName) {
+        if (entryName == null) return null;
         int firstDashIndex = entryName.indexOf('-');
         int lastDashIndex = entryName.lastIndexOf('-');
+
+        if (firstDashIndex == -1 || firstDashIndex == lastDashIndex) return null;
 
         try {
             String typeName = entryName.substring(0, firstDashIndex);
             String versionName = entryName.substring(firstDashIndex + 1, lastDashIndex);
             String versionCode = entryName.substring(lastDashIndex + 1);
 
-            for (ContentProfile profile : profilesMap.get(ContentProfile.ContentType.getTypeByName(typeName))) {
-                if (versionName.equals(profile.verName) && Integer.parseInt(versionCode) == profile.verCode)
-                    return profile;
+            List<ContentProfile> profiles = profilesMap.get(ContentProfile.ContentType.getTypeByName(typeName));
+            if (profiles != null) {
+                for (ContentProfile profile : profiles) {
+                    if (versionName.equals(profile.verName) && Integer.parseInt(versionCode) == profile.verCode)
+                        return profile;
+                }
             }
-        } catch (Exception e) {
-        }
+        } catch (Exception e) {}
 
         return null;
     }

@@ -82,9 +82,26 @@ import java.nio.file.Files;
             this.name = FileUtils.getBasename(file.getPath());
             this.icon = icon;
             this.iconFile = iconFile;
-            String path = execArgs.substring(execArgs.lastIndexOf("wine ") + 5).trim();
+            
+            String path = execArgs;
+            int wineIndex = execArgs.lastIndexOf("wine ");
+            if (wineIndex != -1) {
+                path = execArgs.substring(wineIndex + 5).trim();
+            }
+            
             if (path.startsWith("\"") && path.endsWith("\"")) path = path.substring(1, path.length() - 1);
-            this.path = StringUtils.unescape(path);
+            path = StringUtils.unescape(path);
+            
+            // Normalize DOS paths like A:game.exe to A:\game.exe
+            if (path != null && path.matches("^[A-Z]:[^\\\\/].*")) {
+                path = path.substring(0, 2) + "\\" + path.substring(2);
+            }
+            // If it's just "A:", make it "A:\"
+            if (path != null && path.matches("^[A-Z]:$")) {
+                path = path + "\\";
+            }
+            
+            this.path = path;
             this.wmClass = wmClass;
 
             this.customCoverArtPath = getExtra("customCoverArtPath");
