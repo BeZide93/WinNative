@@ -86,6 +86,12 @@
             android:screenOrientation="sensor"
             android:exported="false" />
 
+        <activity
+            android:name="com.winlator.cmod.gog.ui.auth.GOGOAuthActivity"
+            android:theme="@style/AppTheme.Dark"
+            android:screenOrientation="sensor"
+            android:exported="false" />
+
         <!-- Hub Activity -->
         <activity
             android:name="com.winlator.cmod.HubActivity"
@@ -169,6 +175,12 @@
 
         <service
             android:name="com.winlator.cmod.epic.service.EpicService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.winlator.cmod.gog.service.GOGService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

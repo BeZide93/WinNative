@@ -149,6 +149,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         boolean hideSidebar = intent.hasExtra("edit_shortcut_path") || 
                             intent.hasExtra("create_shortcut_for_app_id") || 
                             intent.hasExtra("create_shortcut_for_epic_id") ||
+                            intent.hasExtra("create_shortcut_for_gog_id") ||
                             intent.hasExtra("create_shortcut_for_app_name");
 
         if (sidebar != null) {
@@ -168,19 +169,34 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
         int createShortcutForAppId = intent.getIntExtra("create_shortcut_for_app_id", 0);
         int createShortcutForEpicId = intent.getIntExtra("create_shortcut_for_epic_id", 0);
+        String createShortcutForGogId = intent.getStringExtra("create_shortcut_for_gog_id");
 
-        if (createShortcutForAppId > 0 || createShortcutForEpicId > 0) {
+        if (createShortcutForAppId > 0 || createShortcutForEpicId > 0 || (createShortcutForGogId != null && !createShortcutForGogId.isEmpty())) {
             String createShortcutForAppName = intent.getStringExtra("create_shortcut_for_app_name");
-            int targetAppId = createShortcutForAppId > 0 ? createShortcutForAppId : createShortcutForEpicId;
-            String targetSource = createShortcutForAppId > 0 ? "STEAM" : "EPIC";
+            boolean isGogShortcutRequest = createShortcutForGogId != null && !createShortcutForGogId.isEmpty();
+            int targetAppId = isGogShortcutRequest ? createShortcutForAppId : (createShortcutForAppId > 0 ? createShortcutForAppId : createShortcutForEpicId);
+            String targetSource = isGogShortcutRequest ? "GOG" : (createShortcutForAppId > 0 ? "STEAM" : "EPIC");
 
             // Search for an existing shortcut with this app_id so we can edit it
             // instead of creating a new one each time
             Shortcut existingShortcut = null;
             for (Shortcut s : containerManager.loadShortcuts()) {
-                String appIdExtra = s.getExtra("app_id");
                 String sourceExtra = s.getExtra("game_source", "STEAM");
-                if (appIdExtra != null && !appIdExtra.isEmpty() && sourceExtra.equals(targetSource)) {
+                if (!sourceExtra.equals(targetSource)) {
+                    continue;
+                }
+
+                if ("GOG".equals(targetSource)) {
+                    String gogIdExtra = s.getExtra("gog_id");
+                    if (createShortcutForGogId.equals(gogIdExtra)) {
+                        existingShortcut = s;
+                        break;
+                    }
+                    continue;
+                }
+
+                String appIdExtra = s.getExtra("app_id");
+                if (appIdExtra != null && !appIdExtra.isEmpty()) {
                     try {
                         if (Integer.parseInt(appIdExtra) == targetAppId) {
                             existingShortcut = s;
@@ -195,9 +211,11 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 show(new ContainerDetailFragment(existingShortcut));
             } else {
                 // No existing shortcut — open in create-new mode
-                if (createShortcutForAppId > 0) {
+                if (isGogShortcutRequest) {
+                    show(new ContainerDetailFragment(0, targetAppId, createShortcutForAppName, "GOG", createShortcutForGogId));
+                } else if (createShortcutForAppId > 0) {
                     show(new ContainerDetailFragment(0, createShortcutForAppId, createShortcutForAppName));
-                } else {
+                } else if (createShortcutForEpicId > 0) {
                     show(new ContainerDetailFragment(0, createShortcutForEpicId, createShortcutForAppName, "EPIC"));
                 }
             }

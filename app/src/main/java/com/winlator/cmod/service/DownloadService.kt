@@ -4,6 +4,7 @@ import android.content.Context
 import com.winlator.cmod.utils.StorageUtils
 import com.winlator.cmod.steam.service.SteamService
 import com.winlator.cmod.epic.service.EpicService
+import com.winlator.cmod.gog.service.GOGService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -33,6 +34,7 @@ object DownloadService {
         val list = mutableListOf<Pair<String, com.winlator.cmod.steam.data.DownloadInfo>>()
         SteamService.getAllDownloads().forEach { (id, info) -> list.add("STEAM_$id" to info) }
         EpicService.getAllDownloads().forEach { (id, info) -> list.add("EPIC_$id" to info) }
+        GOGService.getAllDownloads().forEach { (id, info) -> list.add("GOG_$id" to info) }
         return list
     }
 

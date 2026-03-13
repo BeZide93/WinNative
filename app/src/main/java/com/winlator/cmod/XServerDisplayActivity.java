@@ -549,6 +549,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 } else {
                     Log.e("XServerDisplayActivity", "EPIC install path missing or invalid: '" + gameInstallPath + "'");
                 }
+            } else if ("GOG".equals(gameSource)) {
+                String gameInstallPath = shortcut.getExtra("game_install_path");
+                if (gameInstallPath.isEmpty()) {
+                    String gogId = shortcut.getExtra("gog_id");
+                    if (!gogId.isEmpty()) {
+                        try {
+                            com.winlator.cmod.gog.data.GOGGame gogGame = com.winlator.cmod.gog.service.GOGService.Companion.getGOGGameOf(gogId);
+                            if (gogGame != null) {
+                                String resolved = gogGame.getInstallPath();
+                                if (resolved == null || resolved.isEmpty()) {
+                                    resolved = com.winlator.cmod.gog.service.GOGConstants.INSTANCE.getGameInstallPath(gogGame.getTitle());
+                                }
+                                if (resolved != null && !resolved.isEmpty()) {
+                                    gameInstallPath = resolved;
+                                    shortcut.putExtra("game_install_path", gameInstallPath);
+                                    shortcut.saveData();
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.e("XServerDisplayActivity", "Failed to resolve GOG install path", e);
+                        }
+                    }
+                }
+                if (!gameInstallPath.isEmpty() && new File(gameInstallPath).exists()) {
+                    mountADriveOnContainer(container, gameInstallPath);
+                    Log.d("XServerDisplayActivity", "Mounted A: drive to " + gameInstallPath + " on container " + container.id);
+                } else {
+                    Log.e("XServerDisplayActivity", "GOG install path missing or invalid: '" + gameInstallPath + "'");
+                }
             }
 
             graphicsDriver = shortcut.getExtra("graphicsDriver", container.getGraphicsDriver());
@@ -903,8 +932,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             preloaderDialog.showOnUiThread("Closing Container...");
         }
         
-        // Sync Steam cloud saves before shutting down
-        syncSteamCloudOnExit(() -> {
+        // Sync store cloud saves before shutting down
+        syncStoreCloudOnExit(() -> {
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
@@ -942,15 +971,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
     
     /**
+     * Syncs cloud saves for supported stores when exiting a game.
+     */
+    private void syncStoreCloudOnExit(Runnable onComplete) {
+        if (shortcut == null) {
+            onComplete.run();
+            return;
+        }
+
+        String gameSource = shortcut.getExtra("game_source");
+        if ("STEAM".equals(gameSource)) {
+            syncSteamCloudOnExit(onComplete);
+            return;
+        }
+
+        if ("GOG".equals(gameSource)) {
+            syncGogCloudOnExit(onComplete);
+            return;
+        }
+
+        onComplete.run();
+    }
+
+    /**
      * Syncs Steam cloud saves when exiting a Steam game.
      * Calls SteamService.closeApp() which runs SteamAutoCloud.syncUserFiles()
      * to upload modified save files to Steam Cloud.
      */
     private void syncSteamCloudOnExit(Runnable onComplete) {
-        if (shortcut == null) {
-            onComplete.run();
-            return;
-        }
         boolean isSteamGame = "STEAM".equals(shortcut.getExtra("game_source"));
         if (!isSteamGame) {
             onComplete.run();
@@ -983,6 +1031,36 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.w("XServerDisplayActivity", "Failed to initiate Steam cloud sync", e);
             onComplete.run();
         }
+    }
+
+    private void syncGogCloudOnExit(Runnable onComplete) {
+        String gogId = shortcut.getExtra("gog_id");
+        if (gogId == null || gogId.isEmpty()) {
+            onComplete.run();
+            return;
+        }
+
+        Log.d("XServerDisplayActivity", "Syncing GOG cloud saves for gogId=" + gogId);
+        preloaderDialog.showOnUiThread("Cloud Sync Uploading...");
+
+        new Thread(() -> {
+            try {
+                Boolean syncSuccess = (Boolean) kotlinx.coroutines.BuildersKt.runBlocking(
+                        kotlinx.coroutines.Dispatchers.getIO(),
+                        (scope, continuation) -> com.winlator.cmod.gog.service.GOGService.Companion.syncCloudSaves(
+                                this,
+                                "GOG_" + gogId,
+                                "upload",
+                                continuation
+                        )
+                );
+                Log.d("XServerDisplayActivity", "GOG cloud sync complete for gogId=" + gogId + ", success=" + syncSuccess);
+            } catch (Exception e) {
+                Log.w("XServerDisplayActivity", "Failed to initiate GOG cloud sync", e);
+            } finally {
+                runOnUiThread(onComplete);
+            }
+        }).start();
     }
 
     @Override
@@ -2195,9 +2273,54 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         args = "\"wfm.exe\"";
                     }
                 }
-            } else if (gameSource.equals("EPIC")) {
+            } else if (gameSource.equals("EPIC") || gameSource.equals("GOG")) {
                 String extraArgs = getIntent().getStringExtra("extra_exec_args");
                 extraArgs = (extraArgs != null && !extraArgs.isEmpty()) ? " " + extraArgs : "";
+
+                boolean needsAutoDetect = path == null || path.isEmpty() || "A:\\".equals(path) || "A:\\\\".equals(path);
+                if (needsAutoDetect) {
+                    String gameInstallPath = shortcut.getExtra("game_install_path");
+                    if ((gameInstallPath == null || gameInstallPath.isEmpty()) && gameSource.equals("GOG")) {
+                        String gogId = shortcut.getExtra("gog_id");
+                        if (!gogId.isEmpty()) {
+                            try {
+                                com.winlator.cmod.gog.data.GOGGame gogGame = com.winlator.cmod.gog.service.GOGService.Companion.getGOGGameOf(gogId);
+                                if (gogGame != null) {
+                                    gameInstallPath = gogGame.getInstallPath();
+                                    if ((gameInstallPath == null || gameInstallPath.isEmpty()) && gogGame.getTitle() != null && !gogGame.getTitle().isEmpty()) {
+                                        gameInstallPath = com.winlator.cmod.gog.service.GOGConstants.INSTANCE.getGameInstallPath(gogGame.getTitle());
+                                    }
+                                }
+                            } catch (Exception e) {
+                                Log.e("XServerDisplayActivity", "Failed to resolve GOG install path for auto-detect", e);
+                            }
+                        }
+                    }
+
+                    if (gameInstallPath != null && !gameInstallPath.isEmpty()) {
+                        File gameDir = new File(gameInstallPath);
+                        String detectedPath = findGameExeWinPath(0, gameDir);
+                        if (detectedPath != null && !detectedPath.isEmpty()) {
+                            path = detectedPath;
+
+                            String execLine = "Exec=wine \"" + detectedPath + "\"";
+                            StringBuilder content = new StringBuilder();
+                            boolean replaced = false;
+                            for (String line : FileUtils.readLines(shortcut.file)) {
+                                if (line.startsWith("Exec=")) {
+                                    content.append(execLine).append("\n");
+                                    replaced = true;
+                                } else {
+                                    content.append(line).append("\n");
+                                }
+                            }
+                            if (!replaced) {
+                                content.append(execLine).append("\n");
+                            }
+                            FileUtils.writeString(shortcut.file, content.toString());
+                        }
+                    }
+                }
                 
                 // Epic Games are always on A: drive. 
                 String filename = path;
@@ -2216,7 +2339,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 File nativeDir = com.winlator.cmod.core.WineUtils.getNativePath(imageFs, dir);
                 if (nativeDir != null && nativeDir.exists()) {
                     launcherComponent.setWorkingDir(nativeDir);
-                    Log.d("XServerDisplayActivity", "Set native working dir for Epic process: " + nativeDir.getPath());
+                    Log.d("XServerDisplayActivity", "Set native working dir for store process: " + nativeDir.getPath());
                 }
 
                 if (wineInfo != null && wineInfo.isArm64EC()) {
@@ -2226,7 +2349,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // Avoid StringUtils.escapeDOSPath here as it might double-escape
                     args = "/dir \"" + dir + "\" \"" + filename + "\"" + extraArgs;
                 }
-                Log.d("XServerDisplayActivity", "Epic game launch: " + args);
+                Log.d("XServerDisplayActivity", gameSource + " game launch: " + args);
             } else {
                 // Custom shortcut
                 String extraArgs = shortcut.getExtra("execArgs");

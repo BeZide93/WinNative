@@ -67,4 +67,7 @@ interface SteamAppDao {
 
     @Query("SELECT id FROM steam_app")
     suspend fun getAllAppIds(): List<Int>
+
+    @Query("SELECT * FROM steam_app")
+    suspend fun getAllAsList(): List<SteamApp>
 }

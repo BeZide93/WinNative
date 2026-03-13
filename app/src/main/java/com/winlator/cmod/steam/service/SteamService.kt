@@ -776,6 +776,50 @@ class SteamService : Service(), IChallengeUrlChanged {
             return getInstalledApp(appId)?.dlcDepots
         }
 
+        private fun tryRecoverInstalledAppInfo(appId: Int): AppInfo? {
+            val dirPath = getAppDirPath(appId)
+            val hasCompleteMarker = MarkerUtils.hasMarker(dirPath, Marker.DOWNLOAD_COMPLETE_MARKER)
+            val hasInProgressMarker = MarkerUtils.hasMarker(dirPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
+            if (!hasCompleteMarker || hasInProgressMarker) return null
+
+            val dir = File(dirPath)
+            if (!dir.exists() || !dir.isDirectory) return null
+
+            val downloadedDepotIds = runCatching { getMainAppDepots(appId).keys.sorted() }.getOrDefault(emptyList())
+            val recovered = AppInfo(
+                id = appId,
+                isDownloaded = true,
+                downloadedDepots = downloadedDepotIds,
+                dlcDepots = emptyList(),
+            )
+
+            runBlocking(Dispatchers.IO) {
+                PluviaDatabase.getInstance().appInfoDao().insert(recovered)
+            }
+            Timber.i("Recovered Steam installed metadata from disk for appId=$appId at $dirPath")
+            return recovered
+        }
+
+        fun repairInstalledMetadataFromDisk(): Int {
+            return runBlocking(Dispatchers.IO) {
+                val db = PluviaDatabase.getInstance()
+                val apps = runCatching { db.steamAppDao().getAllAsList() }.getOrElse {
+                    Timber.e(it, "Failed to load Steam apps for install repair")
+                    return@runBlocking 0
+                }
+
+                var repairedCount = 0
+                for (app in apps) {
+                    val installedApp = db.appInfoDao().getInstalledApp(app.id)
+                    if (installedApp?.isDownloaded == true) continue
+                    if (tryRecoverInstalledAppInfo(app.id) != null) {
+                        repairedCount++
+                    }
+                }
+                repairedCount
+            }
+        }
+
         fun getAllDownloads(): Map<Int, DownloadInfo> {
             return downloadJobs
         }
@@ -785,7 +829,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         fun isAppInstalled(appId: Int): Boolean {
-            val appInfo = getInstalledApp(appId)
+            val appInfo = getInstalledApp(appId) ?: tryRecoverInstalledAppInfo(appId)
             if (appInfo?.isDownloaded != true) return false
             val dirPath = getAppDirPath(appId)
             return MarkerUtils.hasMarker(dirPath, Marker.DOWNLOAD_COMPLETE_MARKER)

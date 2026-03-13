@@ -92,6 +92,12 @@ import com.winlator.cmod.epic.data.EpicCredentials
 import com.winlator.cmod.epic.data.EpicGameToken
 import com.winlator.cmod.epic.service.EpicDownloadManager
 import com.winlator.cmod.epic.service.EpicManager
+import com.winlator.cmod.gog.data.GOGGame
+import com.winlator.cmod.gog.data.LibraryItem
+import com.winlator.cmod.gog.service.GOGAuthManager
+import com.winlator.cmod.gog.service.GOGConstants
+import com.winlator.cmod.gog.service.GOGService
+import com.winlator.cmod.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.utils.ControllerHelper
 
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -120,6 +126,8 @@ class UnifiedActivity : ComponentActivity() {
     // Track the currently selected game in the carousel for Game Settings button
     private var selectedSteamAppId: Int = 0
     private var selectedSteamAppName: String = ""
+    private var selectedLibrarySource: String = ""
+    private var selectedGogGameId: String = ""
     
     // Trigger to refresh library when activity resumes from another container
     var libraryRefreshSignal by mutableIntStateOf(0)
@@ -130,6 +138,11 @@ class UnifiedActivity : ComponentActivity() {
     // Flow for library carousel: -1 = scroll left, +1 = scroll right
     val libraryScrollFlow = kotlinx.coroutines.flow.MutableSharedFlow<Int>(extraBufferCapacity = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     private var lastLibraryMoveTime = 0L
+
+    private fun gogPseudoId(gameId: String): Int {
+        val normalized = gameId.hashCode() and 0x1FFFFFFF
+        return 1_500_000_000 + normalized
+    }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         val keyCode = event.keyCode
@@ -182,7 +195,17 @@ class UnifiedActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (GOGService.hasStoredCredentials(this) && !GOGService.isRunning) {
+            GOGService.start(this)
+        }
         libraryRefreshSignal++
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (GOGService.isRunning && !isChangingConfigurations && !GOGService.hasActiveOperations()) {
+            GOGService.stop()
+        }
     }
 
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
@@ -286,6 +309,8 @@ class UnifiedActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         db = PluviaDatabase.getInstance(this)
         EpicAuthManager.updateLoginStatus(this)
+        GOGAuthManager.updateLoginStatus(this)
+        GOGConstants.init(this)
         
         // Start EpicService if user is logged in
         if (EpicService.hasStoredCredentials(this)) {
@@ -295,6 +320,10 @@ class UnifiedActivity : ComponentActivity() {
         // Start SteamService if user is logged in
         if (SteamService.isLoggedIn) {
             SteamService.start(this)
+        }
+
+        if (GOGAuthManager.isLoggedIn(this)) {
+            GOGService.start(this)
         }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -348,6 +377,7 @@ class UnifiedActivity : ComponentActivity() {
         var showFilter by remember { mutableStateOf(false) }
         val isLoggedIn by SteamService.isLoggedInFlow.collectAsState()
         val isEpicLoggedIn by EpicAuthManager.isLoggedInFlow.collectAsState()
+        val isGogLoggedIn by GOGAuthManager.isLoggedInFlow.collectAsState()
         val steamApps by db.steamAppDao().getAllOwnedApps().collectAsState(initial = emptyList())
         val context = LocalContext.current
         val persona by SteamService.instance?.localPersona?.collectAsState()
@@ -357,6 +387,9 @@ class UnifiedActivity : ComponentActivity() {
         // Use libraryRefreshKey as a key for remember so we re-collect from DB when it changes
         val epicApps by remember(libraryRefreshKey) { 
             db.epicGameDao().getAll() 
+        }.collectAsState(initial = emptyList())
+        val gogApps by remember(libraryRefreshKey) {
+            db.gogGameDao().getAll()
         }.collectAsState(initial = emptyList())
 
         var isControllerConnected by remember { mutableStateOf(ControllerHelper.isControllerConnected()) }
@@ -389,6 +422,12 @@ class UnifiedActivity : ComponentActivity() {
             }
         }
 
+        LaunchedEffect(isGogLoggedIn) {
+            if (isGogLoggedIn) {
+                GOGService.start(context)
+            }
+        }
+
         val epicLoginLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
         ) { result ->
@@ -401,6 +440,25 @@ class UnifiedActivity : ComponentActivity() {
                             android.widget.Toast.makeText(context, "Logged in to Epic Games!", android.widget.Toast.LENGTH_SHORT).show()
                         } else {
                             android.widget.Toast.makeText(context, "Epic Login failed: ${authResult.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        }
+
+        val gogLoginLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                val code = result.data?.getStringExtra(GOGOAuthActivity.EXTRA_AUTH_CODE)
+                if (!code.isNullOrBlank()) {
+                    scope.launch {
+                        val authResult = GOGAuthManager.authenticateWithCode(context, code)
+                        if (authResult.isSuccess) {
+                            GOGService.start(context)
+                            android.widget.Toast.makeText(context, "Logged in to GOG!", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            android.widget.Toast.makeText(context, "GOG Login failed: ${authResult.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -431,6 +489,7 @@ class UnifiedActivity : ComponentActivity() {
 
         // Clamp selectedIdx if tabs shrink
         var globalSettingsApp by remember { mutableStateOf<SteamApp?>(null) }
+        var globalSettingsGogGame by remember { mutableStateOf<GOGGame?>(null) }
         
         LaunchedEffect(tabs.size) { if (selectedIdx >= tabs.size) selectedIdx = 0 }
         LaunchedEffect(Unit) { SteamService.requestUserPersona() }
@@ -464,11 +523,16 @@ class UnifiedActivity : ComponentActivity() {
                         // Close menus in order, or show exit confirmation if none are open
                         if (showFilter) showFilter = false
                         else if (globalSettingsApp != null) globalSettingsApp = null
+                        else if (globalSettingsGogGame != null) globalSettingsGogGame = null
                         else if (showAddCustomGame) showAddCustomGame = false
                         else showExitDialog = true
                     }
                     android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
-                        if (key == "library" && selectedSteamAppId != 0) {
+                        if (key == "library" && (selectedSteamAppId != 0 || selectedGogGameId.isNotEmpty())) {
+                            if (selectedLibrarySource == "GOG") {
+                                globalSettingsGogGame = gogApps.find { it.id == selectedGogGameId }
+                                return@collect
+                            }
                             val isCustom = selectedSteamAppId < 0
                             val epicId = if (selectedSteamAppId >= 2000000000) selectedSteamAppId - 2000000000 else 0
                             
@@ -488,12 +552,16 @@ class UnifiedActivity : ComponentActivity() {
                         }
                     }
                     android.view.KeyEvent.KEYCODE_BUTTON_A, android.view.KeyEvent.KEYCODE_DPAD_CENTER -> {
-                        if (key == "library" && selectedSteamAppId != 0) {
+                        if (key == "library" && (selectedSteamAppId != 0 || selectedGogGameId.isNotEmpty())) {
                             val isCustom = selectedSteamAppId < 0
                             val epicId = if (selectedSteamAppId >= 2000000000) selectedSteamAppId - 2000000000 else 0
                             val containerManager = ContainerManager(context)
                             if (isCustom) {
                                 launchCustomGame(context, containerManager, selectedSteamAppName)
+                            } else if (selectedLibrarySource == "GOG") {
+                                gogApps.find { it.id == selectedGogGameId }?.let {
+                                    launchGogGame(context, containerManager, it)
+                                }
                             } else if (epicId > 0) {
                                 val epic = epicApps.find { it.id == epicId }
                                 if (epic != null && epic.isInstalled) {
@@ -527,8 +595,11 @@ class UnifiedActivity : ComponentActivity() {
             Scaffold(
                 containerColor = BgDark,
                 topBar = { TopBar(tabs, selectedIdx, { selectedIdx = it }, persona, context, scope, isControllerConnected, isPS, isLibraryTab) {
-                    // Try Steam apps first, then fall back to custom or epic pseudo-apps
-                    globalSettingsApp = (steamApps.find { it.id == selectedSteamAppId }
+                    if (selectedLibrarySource == "GOG") {
+                        globalSettingsGogGame = gogApps.find { it.id == selectedGogGameId }
+                    } else {
+                        // Try Steam apps first, then fall back to custom or epic pseudo-apps
+                        globalSettingsApp = (steamApps.find { it.id == selectedSteamAppId }
                         ?: if (selectedSteamAppId < 0) {
                             // Build a pseudo SteamApp for the custom game
                             SteamApp(
@@ -546,6 +617,7 @@ class UnifiedActivity : ComponentActivity() {
                                 gameDir = epic?.installPath ?: ""
                             )
                         } else null)
+                    }
                 } }
             ) { padding ->
                 LaunchedEffect(selectedIdx, tabs) {
@@ -556,14 +628,16 @@ class UnifiedActivity : ComponentActivity() {
                     val key = tabs.getOrNull(selectedIdx)?.key ?: "library"
 
                     when (key) {
-                        "library" -> LibraryCarousel(isLoggedIn, filteredSteamApps, epicApps, libraryRefreshKey)
+                        "library" -> LibraryCarousel(isLoggedIn, filteredSteamApps, epicApps, gogApps, libraryRefreshKey)
                         "downloads" -> DownloadsTab(selectedDownloadId, onSelectDownload = { selectedDownloadId = it })
                         "steam", "store" -> SteamStoreTab(isLoggedIn, filteredSteamApps)
 
                         "epic" -> EpicStoreTab(isEpicLoggedIn) {
                             epicLoginLauncher.launch(Intent(this@UnifiedActivity, EpicOAuthActivity::class.java))
                         }
-                        "gog" -> StorePlaceholderTab("GOG")
+                        "gog" -> GOGStoreTab(isGogLoggedIn) {
+                            gogLoginLauncher.launch(Intent(this@UnifiedActivity, GOGOAuthActivity::class.java))
+                        }
                         "amazon" -> StorePlaceholderTab("Amazon Games")
                     }
 
@@ -650,6 +724,12 @@ class UnifiedActivity : ComponentActivity() {
                 onDismissRequest = { globalSettingsApp = null }
             )
         }
+        if (globalSettingsGogGame != null) {
+            GOGGameSettingsDialog(
+                app = globalSettingsGogGame!!,
+                onDismissRequest = { globalSettingsGogGame = null }
+            )
+        }
 
         if (showAddCustomGame) {
             AddCustomGameDialog(onDismiss = { showAddCustomGame = false; libraryRefreshKey++ })
@@ -662,6 +742,8 @@ class UnifiedActivity : ComponentActivity() {
                 showFilter = false
             } else if (globalSettingsApp != null) {
                 globalSettingsApp = null
+            } else if (globalSettingsGogGame != null) {
+                globalSettingsGogGame = null
             } else if (showAddCustomGame) {
                 showAddCustomGame = false
             } else {
@@ -921,7 +1003,7 @@ class UnifiedActivity : ComponentActivity() {
                         }
                     } else {
                         IconButton(onClick = {
-                            if (selectedSteamAppId != 0) {
+                            if (selectedSteamAppId != 0 || selectedGogGameId.isNotEmpty()) {
                                 onGameSettingsClicked()
                             } else {
                                 android.widget.Toast.makeText(context, "Select a game from your library first", android.widget.Toast.LENGTH_SHORT).show()
@@ -1010,7 +1092,13 @@ class UnifiedActivity : ComponentActivity() {
 
     // ─── PS5-style Library Carousel ───────────────────────────────────
     @Composable
-    fun LibraryCarousel(isLoggedIn: Boolean, steamApps: List<SteamApp>, epicApps: List<EpicGame>, libraryRefreshKey: Int = 0) {
+    fun LibraryCarousel(
+        isLoggedIn: Boolean,
+        steamApps: List<SteamApp>,
+        epicApps: List<EpicGame>,
+        gogApps: List<GOGGame>,
+        libraryRefreshKey: Int = 0,
+    ) {
         val context = LocalContext.current
 
         // Load custom game shortcuts from containers
@@ -1044,7 +1132,15 @@ class UnifiedActivity : ComponentActivity() {
             epicApps.filter { it.isInstalled }
         }
 
-        val installedApps = remember(steamInstalled, customApps, epicInstalled, libraryRefreshKey) {
+        val gogInstalled = remember(gogApps, libraryRefreshKey) {
+            gogApps.filter { it.isInstalled && java.io.File(it.installPath).exists() }
+        }
+
+        val gogByPseudoId = remember(gogInstalled) {
+            gogInstalled.associateBy { gogPseudoId(it.id) }
+        }
+
+        val installedApps = remember(steamInstalled, customApps, epicInstalled, gogInstalled, libraryRefreshKey) {
             val playtimePrefs = context.getSharedPreferences("playtime_stats", android.content.Context.MODE_PRIVATE)
             // Map Epic games to pseudo SteamApp objects with large ID offset
             val mappedEpic = epicInstalled.map { epic ->
@@ -1055,7 +1151,15 @@ class UnifiedActivity : ComponentActivity() {
                     gameDir = epic.installPath
                 )
             }
-            val merged = steamInstalled + customApps + mappedEpic
+            val mappedGog = gogInstalled.map { gog ->
+                SteamApp(
+                    id = gogPseudoId(gog.id),
+                    name = gog.title,
+                    developer = gog.developer,
+                    gameDir = gog.installPath,
+                )
+            }
+            val merged = steamInstalled + customApps + mappedEpic + mappedGog
             merged.sortedByDescending { app ->
                 val searchKey = if (app.id >= 2000000000) {
                     app.name
@@ -1145,10 +1249,20 @@ class UnifiedActivity : ComponentActivity() {
         // Track which game is selected for the top-right "Game Settings" button
         val selectedApp = installedApps.getOrNull(centerIdx)
         var selectedAppForSettings by remember { mutableStateOf<SteamApp?>(null) }
+        var selectedGogGameForSettings by remember { mutableStateOf<GOGGame?>(null) }
         
         LaunchedEffect(selectedApp) {
             selectedSteamAppId = selectedApp?.id ?: 0
             selectedSteamAppName = selectedApp?.name ?: ""
+            val gogGame = selectedApp?.let { gogByPseudoId[it.id] }
+            selectedLibrarySource = when {
+                gogGame != null -> "GOG"
+                selectedApp == null -> ""
+                selectedApp.id >= 2000000000 -> "EPIC"
+                selectedApp.id < 0 -> "CUSTOM"
+                else -> "STEAM"
+            }
+            selectedGogGameId = gogGame?.id.orEmpty()
         }
 
         // Use half screen width for content padding so first/last item can center
@@ -1202,6 +1316,7 @@ class UnifiedActivity : ComponentActivity() {
                         ) {
                             GameCapsule(
                                 app = app,
+                                gogGame = gogByPseudoId[app.id],
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .shadow(
@@ -1219,6 +1334,7 @@ class UnifiedActivity : ComponentActivity() {
 
                 // ── Selected game details ──
                 if (selectedApp != null) {
+                    val selectedGogGame = gogByPseudoId[selectedApp.id]
                     val isPS = ControllerHelper.isPlayStationController()
                     val isController = ControllerHelper.isControllerConnected()
 
@@ -1244,7 +1360,13 @@ class UnifiedActivity : ComponentActivity() {
                                 Text(selectedApp.developer, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                             }
                             val isCustom = selectedApp.id < 0
-                            val installed = isCustom || SteamService.isAppInstalled(selectedApp.id)
+                            val isEpic = selectedApp.id >= 2000000000
+                            val installed = when {
+                                selectedGogGame != null -> true
+                                isCustom -> true
+                                isEpic -> true
+                                else -> SteamService.isAppInstalled(selectedApp.id)
+                            }
                             Text(
                                 if (installed) "● Installed" else "○ Not Installed",
                                 style = MaterialTheme.typography.bodySmall,
@@ -1252,6 +1374,8 @@ class UnifiedActivity : ComponentActivity() {
                             )
                             if (isCustom) {
                                 Text("Custom", style = MaterialTheme.typography.bodySmall, color = Accent)
+                            } else if (selectedGogGame != null) {
+                                Text("GOG", style = MaterialTheme.typography.bodySmall, color = Accent)
                             }
                         }
                         Spacer(Modifier.height(16.dp))
@@ -1259,12 +1383,19 @@ class UnifiedActivity : ComponentActivity() {
                             val context = LocalContext.current
                             val containerManager = remember { ContainerManager(context) }
                             val isCustom = selectedApp.id < 0
+                            val isEpic = selectedApp.id >= 2000000000
 
-                            if (isCustom || SteamService.isAppInstalled(selectedApp.id)) {
+                            if (isCustom || isEpic || selectedGogGame != null || SteamService.isAppInstalled(selectedApp.id)) {
                                 Button(
                                     onClick = {
                                         if (isCustom) {
                                             launchCustomGame(context, containerManager, selectedApp.name)
+                                        } else if (selectedGogGame != null) {
+                                            launchGogGame(context, containerManager, selectedGogGame)
+                                        } else if (isEpic) {
+                                            epicApps.find { 2000000000 + it.id == selectedApp.id }?.let {
+                                                launchEpicGame(context, containerManager, it)
+                                            }
                                         } else {
                                             launchSteamGame(context, containerManager, selectedApp)
                                         }
@@ -1282,7 +1413,7 @@ class UnifiedActivity : ComponentActivity() {
                                 }
                             }
 
-                            if (!isCustom) {
+                            if (!isCustom && selectedGogGame == null) {
                                 OutlinedButton(
                                     onClick = { selectedAppForSettings = selectedApp },
                                     shape = RoundedCornerShape(12.dp)
@@ -1296,6 +1427,14 @@ class UnifiedActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            if (selectedGogGame != null) {
+                                OutlinedButton(
+                                    onClick = { selectedGogGameForSettings = selectedGogGame },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Manage", color = TextSecondary)
+                                }
+                            }
                         }
                     }
                 }
@@ -1306,6 +1445,12 @@ class UnifiedActivity : ComponentActivity() {
             GameSettingsDialog(
                 app = selectedAppForSettings!!,
                 onDismissRequest = { selectedAppForSettings = null }
+            )
+        }
+        if (selectedGogGameForSettings != null) {
+            GOGGameSettingsDialog(
+                app = selectedGogGameForSettings!!,
+                onDismissRequest = { selectedGogGameForSettings = null }
             )
         }
     }
@@ -1630,9 +1775,121 @@ class UnifiedActivity : ComponentActivity() {
         }
     }
 
+    @Composable
+    private fun GOGGameSettingsDialog(app: GOGGame, onDismissRequest: () -> Unit) {
+        val context = LocalContext.current
+        var currentTab by remember { mutableStateOf("Menu") }
+        val scope = rememberCoroutineScope()
+
+        Dialog(onDismissRequest = onDismissRequest) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.9f).wrapContentHeight(),
+                shape = RoundedCornerShape(16.dp),
+                color = CardDark
+            ) {
+                Column(Modifier.padding(24.dp)) {
+                    Text(app.title, style = MaterialTheme.typography.titleLarge, color = TextPrimary, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(16.dp))
+
+                    when (currentTab) {
+                        "Menu" -> {
+                            Button(
+                                onClick = {
+                                    val shortcut = ContainerManager(context).loadShortcuts().find {
+                                        it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == app.id
+                                    }
+                                    val intent = Intent(context, MainActivity::class.java)
+                                    if (shortcut != null) {
+                                        intent.putExtra("edit_shortcut_path", shortcut.file.absolutePath)
+                                    } else {
+                                        intent.putExtra("create_shortcut_for_gog_id", app.id)
+                                        intent.putExtra("create_shortcut_for_app_id", gogPseudoId(app.id))
+                                        intent.putExtra("create_shortcut_for_app_name", app.title)
+                                    }
+                                    intent.putExtra("return_to_unified", true)
+                                    val opts = ActivityOptionsCompat.makeCustomAnimation(context, R.anim.settings_enter, R.anim.settings_exit)
+                                    context.startActivity(intent, opts.toBundle())
+                                    onDismissRequest()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("Settings") }
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = { currentTab = "Saves" },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("Saves") }
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = { currentTab = "Uninstall" },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("Uninstall Game") }
+                        }
+                        "Saves" -> {
+                            Text(
+                                "Sync this game's GOG cloud saves. For best results, ensure the game is closed.",
+                                color = TextSecondary,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        GOGService.syncCloudSaves(context, "GOG_${app.id}", "auto")
+                                    }
+                                    android.widget.Toast.makeText(context, "Cloud sync started.", android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("Sync Cloud Saves") }
+                            Spacer(Modifier.height(16.dp))
+                            TextButton(onClick = { currentTab = "Menu" }, modifier = Modifier.align(Alignment.End)) {
+                                Text("Back", color = TextSecondary)
+                            }
+                        }
+                        "Uninstall" -> {
+                            Text(
+                                "Are you sure you want to uninstall ${app.title}? This will permanently delete the game folder.",
+                                color = Color(0xFFFF6B6B)
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            var isUninstalling by remember { mutableStateOf(false) }
+                            if (isUninstalling) {
+                                CircularProgressIndicator(color = Color(0xFFFF4444), modifier = Modifier.align(Alignment.CenterHorizontally))
+                            } else {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = { currentTab = "Menu" }) { Text("Cancel", color = TextSecondary) }
+                                    Spacer(Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            isUninstalling = true
+                                            scope.launch(Dispatchers.IO) {
+                                                GOGService.deleteGame(context, LibraryItem("GOG_${app.id}", app.title, com.winlator.cmod.steam.enums.GameSource.GOG))
+                                                withContext(Dispatchers.Main) {
+                                                    android.widget.Toast.makeText(context, "${app.title} uninstalled.", android.widget.Toast.LENGTH_SHORT).show()
+                                                    onDismissRequest()
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444)),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) { Text("Confirm Uninstall") }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ─── Single game capsule for carousel ─────────────────────────────
     @Composable
-    private fun GameCapsule(app: SteamApp, modifier: Modifier = Modifier) {
+    private fun GameCapsule(app: SteamApp, gogGame: GOGGame? = null, modifier: Modifier = Modifier) {
         val context = LocalContext.current
         val isCustom = app.id < 0
         val isEpic = app.id >= 2000000000
@@ -1649,6 +1906,8 @@ class UnifiedActivity : ComponentActivity() {
                     val containerManager = com.winlator.cmod.container.ContainerManager(context)
                     if (isCustom) {
                         launchCustomGame(context, containerManager, app.name)
+                    } else if (gogGame != null) {
+                        launchGogGame(context, containerManager, gogGame)
                     } else if (isEpic) {
                         epicGame?.let { launchEpicGame(context, containerManager, it) }
                     } else if (SteamService.isAppInstalled(app.id)) {
@@ -1678,6 +1937,16 @@ class UnifiedActivity : ComponentActivity() {
                         Icon(Icons.Default.SportsEsports, contentDescription = app.name, tint = Accent.copy(alpha = 0.6f), modifier = Modifier.size(64.dp))
                     }
                 }
+            } else if (gogGame != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(gogGame.imageUrl.ifEmpty { gogGame.iconUrl })
+                        .crossfade(300)
+                        .build(),
+                    contentDescription = app.name,
+                    modifier = Modifier.fillMaxWidth().height(175.dp),
+                    contentScale = ContentScale.Crop
+                )
             } else if (isEpic) {
                 // Epic game artwork
                 AsyncImage(
@@ -1841,7 +2110,7 @@ class UnifiedActivity : ComponentActivity() {
     ) {
         Dialog(onDismissRequest = onDismissRequest, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(
-                modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.92f),
+                modifier = Modifier.fillMaxWidth(0.864f).fillMaxHeight(0.92f),
                 shape = RoundedCornerShape(20.dp),
                 color = CardDark
             ) {
@@ -1937,8 +2206,9 @@ class UnifiedActivity : ComponentActivity() {
                             Column(
                                 modifier = Modifier
                                     .widthIn(min = 220.dp, max = 280.dp)
-                                    .fillMaxHeight(),
-                                verticalArrangement = Arrangement.Bottom
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom)
                             ) {
                                 actionsContent()
                             }
@@ -2005,7 +2275,7 @@ class UnifiedActivity : ComponentActivity() {
         val effectivePath = customPath ?: EpicConstants.getGameInstallPath(context, app.appName)
         val availableBytes = try { StorageUtils.getAvailableSpace(effectivePath) } catch (e: Exception) { 0L }
         val isInstallEnabled = installed || availableBytes >= totalInstallSize
-        val installPathDisplay = customPath ?: EpicConstants.getGameInstallPath(context, app.appName)
+        val installPathDisplay = customPath ?: EpicConstants.defaultEpicGamesPath(context)
 
         StoreInstallDialogShell(
             title = app.title,
@@ -2020,19 +2290,6 @@ class UnifiedActivity : ComponentActivity() {
                     Spacer(Modifier.height(18.dp))
                     CircularProgressIndicator(color = Accent)
                 } else {
-                    if (app.developer.isNotBlank() || app.publisher.isNotBlank() || app.releaseDate.isNotBlank()) {
-                        Text(
-                            listOfNotNull(
-                                app.developer.takeIf { it.isNotBlank() }?.let { "Developer: $it" },
-                                app.publisher.takeIf { it.isNotBlank() }?.let { "Publisher: $it" },
-                                app.releaseDate.takeIf { it.isNotBlank() }?.let { "Release Date: $it" }
-                            ).joinToString("\n"),
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(Modifier.height(16.dp))
-                    }
                     Text(
                         "Download: ${StorageUtils.formatBinarySize(totalDownloadSize)} • Install: ${StorageUtils.formatBinarySize(totalInstallSize)}",
                         color = TextPrimary
@@ -2106,6 +2363,13 @@ class UnifiedActivity : ComponentActivity() {
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("Play Game") }
             } else {
+                Text(
+                    text = installPathDisplay,
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Button(
                     onClick = {
                         if (customPath == null && defaultPathSet) {
@@ -2120,15 +2384,6 @@ class UnifiedActivity : ComponentActivity() {
                 ) {
                     Text(if (customPath != null) "Custom" else if (defaultPathSet) "Already Set" else "Custom", color = TextPrimary)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = installPathDisplay,
-                    color = TextSecondary,
-                    fontSize = 11.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(12.dp))
                 Button(
                     enabled = !isLoading && isInstallEnabled,
                     onClick = {
@@ -2143,6 +2398,198 @@ class UnifiedActivity : ComponentActivity() {
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = if (!isLoading && isInstallEnabled) Accent else Color.Gray),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Install") }
+            }
+        }
+    }
+
+    @Composable
+    fun GOGStoreTab(isLoggedIn: Boolean, onLoginClick: () -> Unit) {
+        if (!isLoggedIn) {
+            LoginRequiredScreen("GOG", onLoginClick)
+            return
+        }
+
+        val gogApps by db.gogGameDao().getAll().collectAsState(initial = emptyList())
+        val selectedGameId = remember { mutableStateOf<String?>(null) }
+        val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Adaptive(minSize = 150.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(gogApps) { app ->
+                    val isInstalled = app.isInstalled && java.io.File(app.installPath).exists()
+                    Column(
+                        modifier = Modifier
+                            .width(160.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(CardDark)
+                            .clickable { selectedGameId.value = app.id }
+                    ) {
+                        Box {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(app.imageUrl.ifEmpty { app.iconUrl })
+                                    .crossfade(300)
+                                    .build(),
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxWidth().height(165.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                            if (isInstalled) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Installed",
+                                    tint = StatusOnline,
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(24.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = app.title,
+                            modifier = Modifier.padding(8.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+
+        selectedGameId.value?.let { gameId ->
+            val app = gogApps.firstOrNull { it.id == gameId }
+            if (app != null) {
+                GOGGameManagerDialog(app = app) { selectedGameId.value = null }
+            }
+        }
+    }
+
+    @Composable
+    fun GOGGameManagerDialog(app: GOGGame, onDismissRequest: () -> Unit) {
+        val context = LocalContext.current
+        val installed = app.isInstalled && java.io.File(app.installPath).exists()
+        val scope = rememberCoroutineScope()
+        var customPath by remember { mutableStateOf<String?>(null) }
+        var showCustomPathWarning by remember { mutableStateOf(false) }
+
+        val folderPickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocumentTree()
+        ) { uri -> uri?.let { customPath = getPathFromTreeUri(it) } }
+
+        if (showCustomPathWarning) {
+            CustomPathWarningDialog(
+                onDismiss = { showCustomPathWarning = false },
+                onProceed = {
+                    showCustomPathWarning = false
+                    folderPickerLauncher.launch(null)
+                }
+            )
+        }
+
+        val defaultPathSet = if (PrefManager.useSingleDownloadFolder) PrefManager.defaultDownloadFolder.isNotEmpty() else PrefManager.gogDownloadFolder.isNotEmpty()
+        val installRootPath = customPath ?: GOGConstants.defaultGOGGamesPath
+        val installPathDisplay = if (customPath != null) {
+            java.io.File(customPath!!, GOGConstants.getSanitizedGameFolderName(app.title)).absolutePath
+        } else {
+            GOGConstants.getGameInstallPath(app.title)
+        }
+        val requiredBytes = maxOf(app.installSize, app.downloadSize)
+        val availableBytes = try { StorageUtils.getAvailableSpace(installRootPath) } catch (_: Exception) { 0L }
+        val isInstallEnabled = installed || availableBytes >= requiredBytes
+
+        StoreInstallDialogShell(
+            title = app.title,
+            heroImageUrl = app.imageUrl.ifEmpty { app.iconUrl },
+            subtitle = listOfNotNull(
+                app.developer.takeIf { it.isNotBlank() },
+                app.publisher.takeIf { it.isNotBlank() }
+            ).joinToString(" • "),
+            onDismissRequest = onDismissRequest,
+            infoContent = {
+                Text(
+                    "Download: ${StorageUtils.formatBinarySize(app.downloadSize)} • Install: ${StorageUtils.formatBinarySize(app.installSize)}",
+                    color = TextPrimary
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Available: ${StorageUtils.formatBinarySize(availableBytes)}",
+                    color = if (isInstallEnabled) TextSecondary else Color(0xFFFF6B6B)
+                )
+            }
+        ) {
+            if (installed) {
+                Button(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            GOGService.syncCloudSaves(context, "GOG_${app.id}", "auto")
+                        }
+                        onDismissRequest()
+                        android.widget.Toast.makeText(context, "Cloud sync started.", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Sync Cloud Saves", color = TextPrimary) }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        launchGogGame(context, ContainerManager(context), app)
+                        onDismissRequest()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Play Game", color = TextSecondary) }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            GOGService.deleteGame(context, LibraryItem("GOG_${app.id}", app.title, com.winlator.cmod.steam.enums.GameSource.GOG))
+                            withContext(Dispatchers.Main) { onDismissRequest() }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444)),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Uninstall") }
+            } else {
+                Text(
+                    text = installPathDisplay,
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Button(
+                    onClick = {
+                        if (customPath == null && defaultPathSet) {
+                            showCustomPathWarning = true
+                        } else {
+                            folderPickerLauncher.launch(null)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(if (customPath != null) "Custom" else if (defaultPathSet) "Already Set" else "Custom", color = TextPrimary)
+                }
+                Button(
+                    enabled = isInstallEnabled,
+                    onClick = {
+                        GOGService.downloadGame(context, app.id, installPathDisplay, PrefManager.containerLanguage)
+                        onDismissRequest()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isInstallEnabled) Accent else Color.Gray),
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("Install") }
             }
@@ -2320,7 +2767,7 @@ class UnifiedActivity : ComponentActivity() {
                             if (anyActive) SteamService.pauseAll() else SteamService.resumeAll()
                         } else {
                             if (isPaused) {
-                                val appId = selectedId.removePrefix("STEAM_").removePrefix("EPIC_").toIntOrNull() ?: 0
+                                val appId = selectedId.removePrefix("STEAM_").removePrefix("EPIC_").removePrefix("GOG_").toIntOrNull() ?: 0
                                 if (selectedId.startsWith("STEAM_")) SteamService.downloadApp(appId)
                             } else {
                                 selectedInfo?.cancel("Paused by user")
@@ -2422,26 +2869,31 @@ class UnifiedActivity : ComponentActivity() {
         val statusMessage by info.getStatusMessageFlow().collectAsState()
         val isSteam = id.startsWith("STEAM_")
         val isEpic = id.startsWith("EPIC_")
+        val isGog = id.startsWith("GOG_")
         val appId = if (isSteam) id.removePrefix("STEAM_").toIntOrNull() ?: 0 
                     else if (isEpic) id.removePrefix("EPIC_").toIntOrNull() ?: 0
                     else 0
+        val gogId = if (isGog) id.removePrefix("GOG_") else ""
                     
         var steamApp by remember(appId) { mutableStateOf<SteamApp?>(null) }
         var epicGame by remember(appId) { mutableStateOf<EpicGame?>(null) }
+        var gogGame by remember(gogId) { mutableStateOf<GOGGame?>(null) }
         val context = LocalContext.current
         var isFocused by remember { mutableStateOf(false) }
         val borderColor = if (isFocused || isSelected) Accent.copy(alpha = 0.8f) else Color.Transparent
 
-        LaunchedEffect(appId, isSteam, isEpic) {
+        LaunchedEffect(appId, gogId, isSteam, isEpic, isGog) {
             withContext(Dispatchers.IO) { 
                 if (isSteam) steamApp = db.steamAppDao().findApp(appId)
                 else if (isEpic) epicGame = EpicService.getEpicGameOf(appId)
+                else if (isGog) gogGame = GOGService.getGOGGameOf(gogId)
             }
         }
 
-        val displayName = if (isSteam) steamApp?.name else if (isEpic) epicGame?.title else "Unknown Game"
+        val displayName = if (isSteam) steamApp?.name else if (isEpic) epicGame?.title else if (isGog) gogGame?.title else "Unknown Game"
         val displayImage = if (isSteam) steamApp?.getHeaderImageUrl()
                            else if (isEpic) epicGame?.primaryImageUrl ?: epicGame?.iconUrl
+                           else if (isGog) gogGame?.imageUrl ?: gogGame?.iconUrl
                            else null
 
         Surface(
@@ -2625,22 +3077,6 @@ class UnifiedActivity : ComponentActivity() {
                     CircularProgressIndicator(color = Accent)
                 } else {
                     Text(
-                        buildList {
-                            if (app.developer.isNotBlank()) add("Developer: ${app.developer}")
-                            if (app.publisher.isNotBlank()) add("Publisher: ${app.publisher}")
-                            if (app.releaseDate > 0) {
-                                val releaseMillis = if (app.releaseDate < 1_000_000_000_000L) app.releaseDate * 1000L else app.releaseDate
-                                add("Release Date: ${java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(releaseMillis))}")
-                            }
-                            add("App ID: ${app.id}")
-                            add("Install Folder: ${app.installDir.ifBlank { app.name }}")
-                        }.joinToString("\n"),
-                        color = TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
                         "Download: ${StorageUtils.formatBinarySize(totalDownloadSize)} • Install: ${StorageUtils.formatBinarySize(totalInstallSize)}",
                         color = TextPrimary
                     )
@@ -2675,6 +3111,13 @@ class UnifiedActivity : ComponentActivity() {
                 }
             }
         ) {
+            Text(
+                text = installPathDisplay,
+                color = TextSecondary,
+                fontSize = 11.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
             Button(
                 onClick = {
                     if (customPath == null && defaultPathSet) {
@@ -2689,15 +3132,6 @@ class UnifiedActivity : ComponentActivity() {
             ) {
                 Text(if (customPath != null) "Custom" else if (defaultPathSet) "Already Set" else "Custom", color = TextPrimary)
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = installPathDisplay,
-                color = TextSecondary,
-                fontSize = 11.sp,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(12.dp))
             Button(
                 enabled = !isLoading && isInstallEnabled,
                 onClick = {
@@ -2963,6 +3397,146 @@ class UnifiedActivity : ComponentActivity() {
                 intent.putExtra("extra_exec_args", args) // Pass fresh tokens
                 context.startActivity(intent)
             }
+        }
+    }
+
+    private fun launchGogGame(context: android.content.Context, containerManager: ContainerManager, app: GOGGame) {
+        val gameInstallPath = app.installPath.takeIf { it.isNotEmpty() } ?: GOGConstants.getGameInstallPath(app.title)
+        val gameDir = java.io.File(gameInstallPath)
+        if (!gameDir.exists()) {
+            android.widget.Toast.makeText(context, "Game not installed: ${app.title}", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        var existingShortcut = containerManager.loadShortcuts().find {
+            it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == app.id
+        }
+
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            val gogAppId = "GOG_${app.id}"
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                GOGService.syncCloudSaves(context, gogAppId)
+            }
+
+            if (existingShortcut != null) {
+                val shortcut = existingShortcut!!
+                shortcut.putExtra("game_install_path", gameInstallPath)
+
+                // Repair broken Exec line if exe path is missing (just "A:\")
+                val currentPath = shortcut.path
+                if (currentPath == null || currentPath == "A:\\" || currentPath == "A:\\\\") {
+                    val newExecCmd = if (shortcut.getExtra("launch_exe_path").isNotEmpty()) {
+                        val selectedExe = java.io.File(shortcut.getExtra("launch_exe_path"))
+                        if (selectedExe.exists()) {
+                            val normalizedBaseDir = java.io.File(gameInstallPath).absolutePath.removeSuffix("/")
+                            val normalizedExePath = selectedExe.absolutePath
+                            if (normalizedExePath == normalizedBaseDir || normalizedExePath.startsWith("$normalizedBaseDir/")) {
+                                val dosPath = selectedExe.relativeTo(java.io.File(gameInstallPath)).path.replace("/", "\\\\")
+                                "wine \"A:\\\\${dosPath}\""
+                            } else {
+                                val hostPath = normalizedExePath.replace("/", "\\\\").let { if (it.startsWith("\\")) it else "\\$it" }
+                                "wine \"Z:${hostPath}\""
+                            }
+                        } else null
+                    } else {
+                        val libraryItem = LibraryItem("GOG_${app.id}", app.title, com.winlator.cmod.steam.enums.GameSource.GOG)
+                        val exePath = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            GOGService.getInstalledExe(libraryItem)
+                        }
+                        if (exePath.isNotEmpty()) {
+                            "wine \"A:\\\\${exePath.replace("/", "\\\\")}\""
+                        } else {
+                            val exeFile = findGameExe(gameDir)
+                            if (exeFile != null) {
+                                val dosPath = exeFile.relativeTo(gameDir).path.replace("/", "\\\\")
+                                "wine \"A:\\\\${dosPath}\""
+                            } else null
+                        }
+                    }
+                    if (newExecCmd != null) {
+                        val lines = com.winlator.cmod.core.FileUtils.readLines(shortcut.file)
+                        val sb = StringBuilder()
+                        for (line in lines) {
+                            if (line.startsWith("Exec=")) {
+                                sb.append("Exec=$newExecCmd\n")
+                            } else {
+                                sb.append(line).append("\n")
+                            }
+                        }
+                        com.winlator.cmod.core.FileUtils.writeString(shortcut.file, sb.toString())
+                    }
+                }
+
+                shortcut.saveData()
+                mountADrive(shortcut.container, gameInstallPath)
+
+                val intent = Intent(context, XServerDisplayActivity::class.java)
+                intent.putExtra("container_id", shortcut.container.id)
+                intent.putExtra("shortcut_path", shortcut.file.path)
+                intent.putExtra("shortcut_name", shortcut.name)
+                context.startActivity(intent)
+                return@launch
+            }
+
+            val libraryItem = LibraryItem("GOG_${app.id}", app.title, com.winlator.cmod.steam.enums.GameSource.GOG)
+            val exePath = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                GOGService.getInstalledExe(libraryItem)
+            }
+            val execCmd = if (exePath.isNotEmpty()) {
+                "wine \"A:\\\\${exePath.replace("/", "\\\\")}\""
+            } else {
+                val exeFile = findGameExe(gameDir)
+                if (exeFile != null) {
+                    val dosPath = exeFile.relativeTo(gameDir).path.replace("/", "\\\\")
+                    "wine \"A:\\\\${dosPath}\""
+                } else {
+                    "wine \"A:\\\\\""
+                }
+            }
+
+            var container = containerManager.getContainers().firstOrNull()
+            if (container == null) {
+                try {
+                    val data = org.json.JSONObject()
+                    data.put("name", "Default")
+                    data.put("wineVersion", com.winlator.cmod.core.WineInfo.MAIN_WINE_VERSION.identifier())
+                    val contentsManager = com.winlator.cmod.contents.ContentsManager(context)
+                    contentsManager.syncContents()
+                    container = containerManager.createContainer(data, contentsManager)
+                } catch (_: Exception) {}
+            }
+
+            if (container == null) {
+                android.widget.Toast.makeText(context, "Failed to build container", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            mountADrive(container, gameInstallPath)
+
+            val desktopDir = container.getDesktopDir()
+            if (!desktopDir.exists()) desktopDir.mkdirs()
+            val shortcutFile = java.io.File(desktopDir, "${app.title.replace("/", "_")}.desktop")
+            val content = java.lang.StringBuilder()
+            content.append("[Desktop Entry]\n")
+            content.append("Type=Application\n")
+            content.append("Name=${app.title}\n")
+            content.append("Exec=$execCmd\n")
+            content.append("Icon=gog_icon_${app.id}\n")
+            content.append("\n[Extra Data]\n")
+            content.append("game_source=GOG\n")
+            content.append("gog_id=${app.id}\n")
+            content.append("app_id=${gogPseudoId(app.id)}\n")
+            content.append("container_id=${container.id}\n")
+            content.append("game_install_path=${gameInstallPath}\n")
+
+            com.winlator.cmod.core.FileUtils.writeString(shortcutFile, content.toString())
+            container.saveData()
+
+            val intent = Intent(context, XServerDisplayActivity::class.java)
+            intent.putExtra("container_id", container.id)
+            intent.putExtra("shortcut_path", shortcutFile.path)
+            intent.putExtra("shortcut_name", app.title)
+            context.startActivity(intent)
         }
     }
 

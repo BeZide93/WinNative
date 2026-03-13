@@ -99,6 +99,7 @@ public class ContainerDetailFragment extends Fragment {
     private int createShortcutForAppId = 0;
     private String createShortcutForAppName = "";
     private String createShortcutForSource = "STEAM";
+    private String createShortcutForGogId = "";
 
     private boolean isDarkMode;
 
@@ -117,10 +118,15 @@ public class ContainerDetailFragment extends Fragment {
     }
 
     public ContainerDetailFragment(int containerId, int createShortcutForAppId, String createShortcutForAppName, String source) {
+        this(containerId, createShortcutForAppId, createShortcutForAppName, source, "");
+    }
+
+    public ContainerDetailFragment(int containerId, int createShortcutForAppId, String createShortcutForAppName, String source, String gogId) {
         this.containerId = containerId;
         this.createShortcutForAppId = createShortcutForAppId;
         this.createShortcutForAppName = createShortcutForAppName;
         this.createShortcutForSource = source != null ? source : "STEAM";
+        this.createShortcutForGogId = gogId != null ? gogId : "";
     }
 
     public ContainerDetailFragment(Shortcut shortcut) {
@@ -327,6 +333,10 @@ public class ContainerDetailFragment extends Fragment {
         return shortcut != null;
     }
 
+    private boolean isCreateShortcutMode() {
+        return createShortcutForAppId > 0 || ("GOG".equals(createShortcutForSource) && !createShortcutForGogId.isEmpty());
+    }
+
     @SuppressLint("SetTextI18n")
     @Nullable
     @Override
@@ -372,7 +382,7 @@ public class ContainerDetailFragment extends Fragment {
         final EditText etName = view.findViewById(R.id.ETName);
         final View llLaunchExe = view.findViewById(R.id.LLLaunchExe);
         final TextView btSelectExe = view.findViewById(R.id.BTSelectExe);
-        final boolean showLaunchExeSelector = isShortcutMode() || createShortcutForAppId > 0;
+        final boolean showLaunchExeSelector = isShortcutMode() || isCreateShortcutMode();
         final String[] selectedExePath = new String[]{resolveInitialLaunchExePath()};
 
         final Spinner sWineVersion = view.findViewById(R.id.SWineVersion);
@@ -387,7 +397,7 @@ public class ContainerDetailFragment extends Fragment {
             etName.setEnabled(false); // Can't rename shortcut here
         } else if (isEditMode() && container != null) {
             etName.setText(container.getName());
-        } else if (createShortcutForAppId > 0) {
+        } else if (isCreateShortcutMode()) {
             etName.setText(createShortcutForAppName);
         } else {
             etName.setText(getString(R.string.container) + "-" + manager.getNextContainerId());
@@ -659,7 +669,7 @@ public class ContainerDetailFragment extends Fragment {
                         if ("CUSTOM".equals(gameSource)) {
                             shortcut.putExtra("custom_exe", selectedExePath[0]);
                         }
-                        rewriteShortcutExecLine(shortcut.file, buildExecCommandForSource(gameSource, shortcutAppId(), shortcut, selectedExePath[0]));
+                        rewriteShortcutExecLine(shortcut.file, buildExecCommandForSource(gameSource, shortcutAppId(), shortcutGogId(), shortcut, selectedExePath[0]));
                     }
 
                     // Save overrides to Shortcut extraData
@@ -751,7 +761,7 @@ public class ContainerDetailFragment extends Fragment {
                     container.saveData();
                     saveWineRegistryKeys(view);
                     getActivity().onBackPressed();
-                } else if (createShortcutForAppId > 0) {
+                } else if (isCreateShortcutMode()) {
                     JSONObject data = new JSONObject();
                     data.put("screenSize", screenSize);
                     data.put("envVars", envVars);
@@ -794,8 +804,8 @@ public class ContainerDetailFragment extends Fragment {
                     data.put("controllerMapping", controllerMapping);
                     if (showLaunchExeSelector && selectedExePath[0] != null && !selectedExePath[0].isEmpty()) {
                         data.put("launchExePath", selectedExePath[0]);
-                        if ("EPIC".equals(createShortcutForSource)) {
-                            String gameInstallPath = resolveBaseGameDirectory(createShortcutForSource, createShortcutForAppId, null, selectedExePath[0]);
+                        if ("EPIC".equals(createShortcutForSource) || "GOG".equals(createShortcutForSource)) {
+                            String gameInstallPath = resolveBaseGameDirectory(createShortcutForSource, createShortcutForAppId, createShortcutForGogId, null, selectedExePath[0]);
                             if (!gameInstallPath.isEmpty()) {
                                 data.put("game_install_path", gameInstallPath);
                             }
@@ -1636,6 +1646,11 @@ public class ContainerDetailFragment extends Fragment {
         }
     }
 
+    private String shortcutGogId() {
+        if (!isShortcutMode()) return createShortcutForGogId;
+        return shortcut.getExtra("gog_id");
+    }
+
     private String resolveInitialLaunchExePath() {
         if (!isShortcutMode()) return "";
 
@@ -1648,10 +1663,10 @@ public class ContainerDetailFragment extends Fragment {
             if (!customExe.isEmpty()) return customExe;
         }
 
-        return resolveAbsolutePathFromShortcut(gameSource, shortcutAppId(), shortcut, shortcut.path);
+        return resolveAbsolutePathFromShortcut(gameSource, shortcutAppId(), shortcutGogId(), shortcut, shortcut.path);
     }
 
-    private String resolveAbsolutePathFromShortcut(String gameSource, int appId, @Nullable Shortcut shortcut, @Nullable String shortcutPath) {
+    private String resolveAbsolutePathFromShortcut(String gameSource, int appId, @Nullable String gogId, @Nullable Shortcut shortcut, @Nullable String shortcutPath) {
         if (shortcutPath == null || shortcutPath.isEmpty()) return "";
 
         if ("C:\\Program Files (x86)\\Steam\\steamclient_loader_x64.exe".equalsIgnoreCase(shortcutPath)) {
@@ -1659,7 +1674,7 @@ public class ContainerDetailFragment extends Fragment {
         }
 
         if (shortcutPath.regionMatches(true, 0, "A:\\", 0, 3)) {
-            String baseDir = resolveBaseGameDirectory(gameSource, appId, shortcut, "");
+            String baseDir = resolveBaseGameDirectory(gameSource, appId, gogId, shortcut, "");
             if (baseDir.isEmpty()) return "";
             String relativePath = shortcutPath.substring(3).replace("\\", File.separator);
             return new File(baseDir, relativePath).getAbsolutePath();
@@ -1676,7 +1691,7 @@ public class ContainerDetailFragment extends Fragment {
         return "";
     }
 
-    private String resolveBaseGameDirectory(String gameSource, int appId, @Nullable Shortcut shortcut, @Nullable String fallbackExePath) {
+    private String resolveBaseGameDirectory(String gameSource, int appId, @Nullable String gogId, @Nullable Shortcut shortcut, @Nullable String fallbackExePath) {
         if ("STEAM".equals(gameSource) && appId > 0) {
             String installPath = SteamBridge.getAppDirPath(appId);
             if (installPath != null && !installPath.isEmpty()) return installPath;
@@ -1694,6 +1709,28 @@ public class ContainerDetailFragment extends Fragment {
                 }
                 if (installPath != null && !installPath.isEmpty()) return installPath;
             }
+        } else if ("GOG".equals(gameSource)) {
+            if (shortcut != null) {
+                String installPath = shortcut.getExtra("game_install_path");
+                if (!installPath.isEmpty()) return installPath;
+            }
+
+            String effectiveGogId = shortcut != null ? shortcut.getExtra("gog_id") : gogId;
+            if (effectiveGogId != null && !effectiveGogId.isEmpty()) {
+                com.winlator.cmod.gog.data.GOGGame gogGame = com.winlator.cmod.gog.service.GOGService.Companion.getGOGGameOf(effectiveGogId);
+                if (gogGame != null) {
+                    String installPath = gogGame.getInstallPath();
+                    if ((installPath == null || installPath.isEmpty()) && gogGame.getTitle() != null && !gogGame.getTitle().isEmpty()) {
+                        installPath = com.winlator.cmod.gog.service.GOGConstants.INSTANCE.getGameInstallPath(gogGame.getTitle());
+                    }
+                    if (installPath != null && !installPath.isEmpty()) return installPath;
+                }
+            }
+
+            if (createShortcutForAppName != null && !createShortcutForAppName.isEmpty()) {
+                String installPath = com.winlator.cmod.gog.service.GOGConstants.INSTANCE.getGameInstallPath(createShortcutForAppName);
+                if (installPath != null && !installPath.isEmpty()) return installPath;
+            }
         } else if ("CUSTOM".equals(gameSource)) {
             if (shortcut != null) {
                 String gameFolder = shortcut.getExtra("custom_game_folder");
@@ -1709,9 +1746,9 @@ public class ContainerDetailFragment extends Fragment {
         return "";
     }
 
-    private String buildExecCommandForSource(String gameSource, int appId, @Nullable Shortcut shortcut, @Nullable String selectedExePath) {
+    private String buildExecCommandForSource(String gameSource, int appId, @Nullable String gogId, @Nullable Shortcut shortcut, @Nullable String selectedExePath) {
         if (selectedExePath == null || selectedExePath.isEmpty()) {
-            if ("EPIC".equals(gameSource)) {
+            if ("EPIC".equals(gameSource) || "GOG".equals(gameSource)) {
                 return "wine \"A:\\\\\"";
             }
             return "wine \"C:\\\\Program Files (x86)\\\\Steam\\\\steamclient_loader_x64.exe\"";
@@ -1719,7 +1756,7 @@ public class ContainerDetailFragment extends Fragment {
 
         File exeFile = new File(selectedExePath);
         String absoluteExePath = exeFile.getAbsolutePath();
-        String baseDir = resolveBaseGameDirectory(gameSource, appId, shortcut, absoluteExePath);
+        String baseDir = resolveBaseGameDirectory(gameSource, appId, gogId, shortcut, absoluteExePath);
         String normalizedBaseDir = baseDir.isEmpty() ? "" : StringUtils.removeEndSlash(new File(baseDir).getAbsolutePath());
         String normalizedExePath = absoluteExePath;
         String winPath;
@@ -1778,16 +1815,21 @@ public class ContainerDetailFragment extends Fragment {
         content.append("[Desktop Entry]\n");
         content.append("Type=Application\n");
         content.append("Name=").append(createShortcutForAppName).append("\n");
-        String execCommand = buildExecCommandForSource(createShortcutForSource, createShortcutForAppId, null, data.optString("launchExePath", ""));
+        String execCommand = buildExecCommandForSource(createShortcutForSource, createShortcutForAppId, createShortcutForGogId, null, data.optString("launchExePath", ""));
         content.append("Exec=").append(execCommand).append("\n");
         if (createShortcutForSource.equals("EPIC")) {
             content.append("Icon=epic_icon_").append(createShortcutForAppId).append("\n");
+        } else if (createShortcutForSource.equals("GOG")) {
+            content.append("Icon=gog_icon_").append(createShortcutForGogId).append("\n");
         } else {
             content.append("Icon=steam_icon_").append(createShortcutForAppId).append("\n");
         }
         content.append("\n[Extra Data]\n");
         content.append("game_source=").append(createShortcutForSource).append("\n");
         content.append("app_id=").append(createShortcutForAppId).append("\n");
+        if (createShortcutForSource.equals("GOG")) {
+            content.append("gog_id=").append(createShortcutForGogId).append("\n");
+        }
         content.append("container_id=").append(container.id).append("\n");
 
         // Write all additional overrides from data as extra data

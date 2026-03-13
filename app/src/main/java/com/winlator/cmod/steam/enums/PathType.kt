@@ -2,6 +2,7 @@ package com.winlator.cmod.steam.enums
 
 import android.content.Context
 import com.winlator.cmod.steam.service.SteamService
+import com.winlator.cmod.steam.utils.ContainerUtils
 import com.winlator.cmod.xenvironment.ImageFs
 import java.nio.file.Paths
 import timber.log.Timber
@@ -101,6 +102,64 @@ enum class PathType {
 
     companion object {
         val DEFAULT = SteamUserData
+
+        fun resolveGOGPathVariables(location: String, installPath: String): String {
+            var resolved = location
+            val variableMap = mapOf(
+                "INSTALL" to installPath,
+                "SAVED_GAMES" to "%USERPROFILE%/Saved Games",
+                "APPLICATION_DATA_LOCAL" to "%LOCALAPPDATA%",
+                "APPLICATION_DATA_LOCAL_LOW" to "%APPDATA%\\..\\LocalLow",
+                "APPLICATION_DATA_ROAMING" to "%APPDATA%",
+                "DOCUMENTS" to "%USERPROFILE%\\Documents",
+            )
+            val pattern = Regex("<\\?(\\w+)\\?>")
+            pattern.findAll(resolved).forEach { match ->
+                val replacement = variableMap[match.groupValues[1]]
+                if (replacement != null) {
+                    resolved = resolved.replace(match.value, replacement)
+                }
+            }
+            return resolved
+        }
+
+        fun toAbsPathForGOG(context: Context, gogWindowsPath: String, appId: String? = null): String {
+            val imageFs = ImageFs.find(context)
+            val user = ImageFs.USER
+            val rootDir = if (appId != null) {
+                ContainerUtils.getOrCreateContainer(context, appId).rootDir.absolutePath
+            } else {
+                imageFs.rootDir.absolutePath
+            }
+            val winePrefix = if (appId != null) ".wine" else ImageFs.WINEPREFIX
+
+            var mappedPath = gogWindowsPath
+            mappedPath = mappedPath.replace(
+                "%USERPROFILE%/Saved Games",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "Saved Games/").toString(),
+            ).replace(
+                "%USERPROFILE%\\Saved Games",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "Saved Games/").toString(),
+            ).replace(
+                "%USERPROFILE%/Documents",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "Documents/").toString(),
+            ).replace(
+                "%USERPROFILE%\\Documents",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "Documents/").toString(),
+            )
+            mappedPath = mappedPath.replace(
+                "%LOCALAPPDATA%",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "AppData/Local/").toString(),
+            ).replace(
+                "%APPDATA%",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "AppData/Roaming/").toString(),
+            ).replace(
+                "%USERPROFILE%",
+                Paths.get(rootDir, winePrefix, "drive_c/users/", user, "").toString(),
+            )
+
+            return mappedPath.replace("\\", "/")
+        }
 
         fun from(keyValue: String?): PathType {
             return when (keyValue?.lowercase()) {

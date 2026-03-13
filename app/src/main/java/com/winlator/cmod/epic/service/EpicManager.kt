@@ -4,7 +4,10 @@ import android.content.Context
 import com.winlator.cmod.epic.data.EpicGame
 import com.winlator.cmod.steam.data.LaunchInfo
 import com.winlator.cmod.epic.db.dao.EpicGameDao
+import com.winlator.cmod.steam.enums.Marker
+import com.winlator.cmod.steam.utils.MarkerUtils
 import com.winlator.cmod.steam.utils.Net
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -25,6 +28,7 @@ import timber.log.Timber
 @Singleton
 class EpicManager @Inject constructor(
     private val epicGameDao: EpicGameDao,
+    @ApplicationContext private val context: Context,
 ) {
 
     private val REFRESH_BATCH_SIZE = 10
@@ -215,6 +219,12 @@ class EpicManager @Inject constructor(
             val newGamesList = gamesList.filter { it.catalogItemId !in existingCatalogIds }
             Timber.tag("Epic").d("${newGamesList.size} new games need details fetched")
 
+            if (newGamesList.isEmpty()) {
+                val detectedCount = detectAndUpdateExistingInstallations()
+                Timber.tag("Epic").d("No new Epic games. Detected $detectedCount existing installations")
+                return@withContext Result.success(detectedCount)
+            }
+
             val epicGames = mutableListOf<EpicGame>()
             var processedCount = 0
             for ((index, game) in newGamesList.withIndex()) {
@@ -240,12 +250,74 @@ class EpicManager @Inject constructor(
                 }
             }
 
+            val detectedCount = detectAndUpdateExistingInstallations()
+            if (detectedCount > 0) {
+                Timber.tag("Epic").i("Detected and updated $detectedCount existing Epic installations")
+            }
+
             Timber.tag("Epic").i("Successfully refreshed Epic library")
-            Result.success(processedCount)
+            Result.success(processedCount + detectedCount)
         } catch (e: Exception) {
             Timber.e(e, "Failed to refresh Epic library")
             Result.failure(e)
         }
+    }
+
+    private suspend fun detectAndUpdateExistingInstallations(): Int = withContext(Dispatchers.IO) {
+        var detectedCount = 0
+        val allGames = epicGameDao.getAllAsList()
+
+        for (game in allGames) {
+            if (game.isInstalled && game.installPath.isNotEmpty() && File(game.installPath).exists()) {
+                continue
+            }
+
+            val candidatePaths = linkedSetOf<String>()
+            if (game.installPath.isNotBlank()) {
+                candidatePaths.add(game.installPath)
+            }
+            if (game.title.isNotBlank()) {
+                candidatePaths.add(EpicConstants.getGameInstallPath(context, game.title))
+            }
+            if (game.appName.isNotBlank()) {
+                candidatePaths.add(EpicConstants.getGameInstallPath(context, game.appName))
+            }
+
+            val detectedPath = candidatePaths.firstOrNull { installPath ->
+                installPath.isNotBlank() &&
+                    File(installPath).isDirectory &&
+                    MarkerUtils.hasMarker(installPath, Marker.DOWNLOAD_COMPLETE_MARKER) &&
+                    !MarkerUtils.hasMarker(installPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
+            } ?: continue
+
+            val updatedGame = game.copy(
+                isInstalled = true,
+                installPath = detectedPath,
+                executable = game.executable.ifBlank { getInstalledExeCandidate(detectedPath) },
+            )
+            epicGameDao.update(updatedGame)
+            detectedCount++
+            Timber.tag("Epic").i("Recovered installed Epic game ${game.title} from $detectedPath")
+        }
+
+        detectedCount
+    }
+
+    private fun getInstalledExeCandidate(installPath: String): String {
+        val rootDir = File(installPath)
+        if (!rootDir.isDirectory) return ""
+
+        return rootDir.walkTopDown()
+            .maxDepth(3)
+            .firstOrNull { file ->
+                file.isFile &&
+                    file.extension.equals("exe", ignoreCase = true) &&
+                    !file.name.equals("EpicGamesLauncher.exe", ignoreCase = true)
+            }
+            ?.relativeTo(rootDir)
+            ?.path
+            ?.replace(File.separatorChar, '/')
+            .orEmpty()
     }
 
     /**

@@ -38,9 +38,10 @@ const val DATABASE_NAME = "pluvia_database"
         SteamApp::class,
         SteamLicense::class,
         com.winlator.cmod.epic.data.EpicGame::class,
+        com.winlator.cmod.gog.data.GOGGame::class,
         DownloadingAppInfo::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(
@@ -55,6 +56,8 @@ const val DATABASE_NAME = "pluvia_database"
 abstract class PluviaDatabase : RoomDatabase() {
 
     abstract fun epicGameDao(): com.winlator.cmod.epic.db.dao.EpicGameDao
+
+    abstract fun gogGameDao(): com.winlator.cmod.gog.db.dao.GOGGameDao
 
     abstract fun steamLicenseDao(): SteamLicenseDao
 

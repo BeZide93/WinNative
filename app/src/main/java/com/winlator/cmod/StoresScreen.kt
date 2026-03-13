@@ -88,6 +88,7 @@ private val StatusGreen   = Color(0xFF3FB950)
 data class StoreState(
     val isSteamLoggedIn: Boolean = false,
     val isEpicLoggedIn: Boolean = false,
+    val isGogLoggedIn: Boolean = false,
     val wifiOnly: Boolean = true,
     val sharedFolder: Boolean = true,
     val downloadSpeed: Int = 24,
@@ -116,6 +117,8 @@ fun StoresScreen(
     onSteamSignOut: () -> Unit,
     onEpicSignIn: () -> Unit,
     onEpicSignOut: () -> Unit,
+    onGogSignIn: () -> Unit,
+    onGogSignOut: () -> Unit,
     onWifiOnlyChanged: (Boolean) -> Unit,
     onSharedFolderChanged: (Boolean) -> Unit,
     onDownloadSpeedChanged: (Int) -> Unit,
@@ -158,10 +161,10 @@ fun StoresScreen(
             name = "GOG",
             icon = Icons.Filled.Gamepad,
             accentColor = Color(0xFFA855F7),
-            isLoggedIn = false,
-            isComingSoon = true,
-            onSignIn = {},
-            onSignOut = {},
+            isLoggedIn = state.isGogLoggedIn,
+            isComingSoon = false,
+            onSignIn = onGogSignIn,
+            onSignOut = onGogSignOut,
         )
         StoreCard(
             name = "Amazon Games",

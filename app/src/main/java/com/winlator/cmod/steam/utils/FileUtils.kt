@@ -204,4 +204,14 @@ object FileUtils {
             false
         }
     }
+
+    fun findFileCaseInsensitive(baseDir: File, relativePath: String): File? {
+        val segments = relativePath.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        var current = baseDir
+        for (segment in segments) {
+            val match = current.listFiles()?.firstOrNull { it.name.equals(segment, ignoreCase = true) } ?: return null
+            current = match
+        }
+        return current.takeIf { it.exists() }
+    }
 }

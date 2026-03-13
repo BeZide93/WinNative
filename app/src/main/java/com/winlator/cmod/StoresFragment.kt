@@ -25,9 +25,15 @@ import androidx.fragment.app.Fragment
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.epic.service.EpicAuthManager
 import com.winlator.cmod.epic.ui.auth.EpicOAuthActivity
+import com.winlator.cmod.gog.service.GOGAuthManager
+import com.winlator.cmod.gog.service.GOGService
+import com.winlator.cmod.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.steam.SteamLoginActivity
 import com.winlator.cmod.steam.service.SteamService
 import com.winlator.cmod.steam.utils.PrefManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class StoresFragment : Fragment() {
@@ -55,6 +61,23 @@ class StoresFragment : Fragment() {
     private val amazonFolderLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri -> uri?.let { persistUri(it); PrefManager.amazonDownloadFolder = it.toString(); refresh() } }
+
+    private val gogLoginLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val code = result.data?.getStringExtra(GOGOAuthActivity.EXTRA_AUTH_CODE)
+            if (!code.isNullOrBlank()) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    val authResult = GOGAuthManager.authenticateWithCode(requireContext(), code)
+                    if (authResult.isSuccess) {
+                        GOGService.start(requireContext())
+                    }
+                    refresh()
+                }
+            }
+        }
+    }
 
     // Lifecycle
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -88,6 +111,13 @@ class StoresFragment : Fragment() {
                         onSteamSignOut       = { SteamService.logOut(); refresh() },
                         onEpicSignIn         = { startActivity(Intent(requireContext(), EpicOAuthActivity::class.java)) },
                         onEpicSignOut        = { EpicAuthManager.logoutSync(requireContext()); refresh() },
+                        onGogSignIn          = { gogLoginLauncher.launch(Intent(requireContext(), GOGOAuthActivity::class.java)) },
+                        onGogSignOut         = {
+                            CoroutineScope(Dispatchers.Main).launch {
+                                GOGService.logout(requireContext())
+                                refresh()
+                            }
+                        },
                         onWifiOnlyChanged    = { PrefManager.downloadOnWifiOnly = it; refresh() },
                         onSharedFolderChanged = { PrefManager.useSingleDownloadFolder = it; refresh() },
                         onDownloadSpeedChanged = { PrefManager.downloadSpeed = it; refresh() },
@@ -159,6 +189,7 @@ class StoresFragment : Fragment() {
         storeState = StoreState(
             isSteamLoggedIn = SteamService.isLoggedIn,
             isEpicLoggedIn  = EpicAuthManager.isLoggedIn(ctx),
+            isGogLoggedIn   = GOGAuthManager.isLoggedIn(ctx),
             wifiOnly        = PrefManager.downloadOnWifiOnly,
             sharedFolder    = PrefManager.useSingleDownloadFolder,
             downloadSpeed   = PrefManager.downloadSpeed,
